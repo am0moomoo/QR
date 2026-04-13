@@ -11,8 +11,8 @@
     "storage:cleanup:dry-run": "tsx src/storage-maintenance.ts --dry-run",
     "typecheck": "tsc --noEmit",
     "test:unit": "node --test --require ts-node/register src/app.spec.ts",
-    "test:integration": "node --test --require ts-node/register src/integration/**/*.spec.ts",
-    "test:integration:queue-runtime": "node --test --require ts-node/register src/integration/queue-runtime.spec.ts",
+    "test:integration": "node --test --test-force-exit --require ts-node/register src/integration/app.integration.spec.ts",
+    "test:integration:queue-runtime": "node --test --test-force-exit --require ts-node/register src/integration/queue-runtime.spec.ts",
     "test": "pnpm run test:unit && pnpm run test:integration"
   },
   "dependencies": {

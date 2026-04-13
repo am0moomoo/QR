@@ -150,6 +150,10 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
   }
 
   let stage = "bootstrap";
+  const setStage = (nextStage: string) => {
+    stage = nextStage;
+    console.log(`[queue-runtime][stage=${stage}]`);
+  };
   const server = app!.getHttpServer();
   const workerPipeline = workerContext!.get(QrAssetPipelineService);
   const workerAnalytics = workerContext!.get(AnalyticsService);
@@ -172,7 +176,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
   }) as QrAssetPipelineService["renderAndSync"];
 
   try {
-    stage = "register";
+    setStage("register");
     const registration = await request(server)
       .post("/api/v1/auth/register")
       .send({
@@ -182,7 +186,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
       })
       .expect(201);
 
-    stage = "load-workspace";
+    setStage("load-workspace");
     const workspace = await prisma!.workspace.findFirstOrThrow({
       where: {
         ownerUserId: registration.body.user.id
@@ -190,7 +194,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
     });
 
     const bearerToken = registration.body.accessToken as string;
-    stage = "create-qr";
+    setStage("create-qr");
     const createQr = await request(server)
       .post("/api/v1/qr-codes")
       .set("Authorization", `Bearer ${bearerToken}`)
@@ -227,13 +231,13 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
       })
       .expect(201);
 
-    stage = "assert-render-retry";
+    setStage("assert-render-retry");
     assert.ok(
       renderFailures >= 2,
       `Render job should retry after one worker failure. Saw renderFailures=${renderFailures}.`
     );
 
-    stage = "rerender-concurrent";
+    setStage("rerender-concurrent");
     await Promise.all([
       request(server)
         .post(`/api/v1/qr-codes/${createQr.body.id}/render`)
@@ -245,7 +249,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
         .expect(200)
     ]);
 
-    stage = "assert-render-assets";
+    setStage("assert-render-assets");
     const qrAssets = await prisma!.qRAsset.findMany({
       where: {
         kind: "QR_IMAGE",
@@ -289,7 +293,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
     const requestId = `queue-runtime-${suffix}`;
     const scannedAt = new Date();
 
-    stage = "queue-scan-event";
+    setStage("queue-scan-event");
     await producerScanEvents.recordScanEvent({
       awaitAggregate: true,
       browser: "chrome",
@@ -307,7 +311,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
       userAgent: "Queue Runtime Browser"
     });
 
-    stage = "assert-scan-retries";
+    setStage("assert-scan-retries");
     assert.ok(
       rawFailures >= 2,
       `Scan-event job should retry after one worker failure. Saw rawFailures=${rawFailures}.`
@@ -317,7 +321,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
       `Aggregate job should retry after one worker failure. Saw aggregateFailures=${aggregateFailures}.`
     );
 
-    stage = "assert-scan-event-persisted";
+    setStage("assert-scan-event-persisted");
     const rawEvents = await prisma!.scanEvent.findMany({
       where: {
         qrCodeId: createQr.body.id,
@@ -326,7 +330,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
     });
     assert.equal(rawEvents.length, 1, `Expected one raw scan event, saw ${rawEvents.length}.`);
 
-    stage = "assert-first-aggregate";
+    setStage("assert-first-aggregate");
     const firstAggregate = await prisma!.scanAggregateDaily.findFirstOrThrow({
       where: {
         qrCodeId: createQr.body.id
@@ -339,7 +343,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
       `Expected first aggregate uniqueIps=1, saw ${firstAggregate.uniqueIps}.`
     );
 
-    stage = "queue-duplicate-scan-event";
+    setStage("queue-duplicate-scan-event");
     await producerScanEvents.recordScanEvent({
       awaitAggregate: true,
       browser: "chrome",
@@ -357,7 +361,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
       userAgent: "Queue Runtime Browser"
     });
 
-    stage = "assert-deduped-scan-event";
+    setStage("assert-deduped-scan-event");
     const dedupedEvents = await prisma!.scanEvent.findMany({
       where: {
         qrCodeId: createQr.body.id,
@@ -370,7 +374,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
       `Expected duplicate requestId to remain deduped at one row, saw ${dedupedEvents.length}.`
     );
 
-    stage = "insert-second-raw-event";
+    setStage("insert-second-raw-event");
     await prisma!.scanEvent.create({
       data: {
         browser: "firefox",
@@ -398,18 +402,18 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
       return originalRecomputeDailyAggregate(...args);
     }) as AnalyticsService["recomputeDailyAggregate"];
 
-    stage = "queue-direct-aggregate";
+    setStage("queue-direct-aggregate");
     await producerAggregates.queueDailyAggregate(createQr.body.id, scannedAt, {
       waitForCompletion: true
     });
 
-    stage = "assert-direct-aggregate-retries";
+    setStage("assert-direct-aggregate-retries");
     assert.ok(
       directAggregateFailures >= 2,
       `Direct aggregate job should retry after one worker failure. Saw directAggregateFailures=${directAggregateFailures}.`
     );
 
-    stage = "assert-final-aggregate";
+    setStage("assert-final-aggregate");
     const finalAggregate = await prisma!.scanAggregateDaily.findFirstOrThrow({
       where: {
         qrCodeId: createQr.body.id

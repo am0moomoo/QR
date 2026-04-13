@@ -13,6 +13,21 @@ const telemetry = {
   }
 };
 
+const logger = {
+  debug() {
+    return undefined;
+  },
+  error() {
+    return undefined;
+  },
+  info() {
+    return undefined;
+  },
+  warn() {
+    return undefined;
+  }
+};
+
 const analytics = {
   async getQrAnalytics() {
     return {
@@ -336,12 +351,43 @@ test("QrCodesService.create renders real download assets and returns stable shor
     }
   };
 
+  const assetPipeline = {
+    getExistingExportFormats() {
+      return ["png", "svg"];
+    }
+  };
+  const renderQueue = {
+    async render() {
+      const renderedAssets = await Promise.all(
+        (["png", "svg"] as const).map(async (format) => {
+          const rendered = await qrRender.render({ format });
+          const storageKey = `qr/${workspaceId}/${qrCodeId}/${rendered.checksum}.${rendered.extension}`;
+          await storage.putObject(storageKey, rendered.body);
+
+          return {
+            bytes: rendered.bytes,
+            checksum: rendered.checksum,
+            format: rendered.format,
+            heightPx: rendered.heightPx,
+            publicUrl: `http://localhost:4000/api/v1/qr-codes/${qrCodeId}/downloads?format=${format}`,
+            storageKey,
+            widthPx: rendered.widthPx,
+            workspaceId
+          };
+        })
+      );
+      assets.splice(0, assets.length, ...renderedAssets);
+      return findUniqueOrThrow();
+    }
+  };
+
   const service = new QrCodesService(
     prisma as any,
     telemetry as any,
     slugCache as any,
     storage as any,
-    qrRender as any,
+    assetPipeline as any,
+    renderQueue as any,
     analytics as any
   );
   const result = await service.create("user-1", {
@@ -439,7 +485,8 @@ test("ScanService.resolve asks for a password before redirecting protected QR co
     telemetry as any,
     createSlugCache() as any,
     rateLimit as any,
-    analytics as any
+    analytics as any,
+    logger as any
   );
   const request = {
     headers: {},

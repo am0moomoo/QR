@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma, ScanOutcome } from "@prisma/client";
-import type { Request } from "express";
 import { PrismaService } from "./prisma.service";
+import { StructuredLoggerService } from "./structured-logger.service";
 import { TelemetryService } from "./telemetry.service";
 
 type ScanEventInput = {
@@ -27,103 +27,129 @@ const ANALYTICS_GROUP_LIMIT = 10;
 export class AnalyticsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly telemetry: TelemetryService
+    private readonly telemetry: TelemetryService,
+    private readonly logger: StructuredLoggerService
   ) {}
 
-  recordScanEvent(input: ScanEventInput) {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.scanEvent.create({
-        data: {
-          browser: input.browser,
-          city: null,
-          country: input.country,
-          deviceType: input.deviceType,
-          ipHash: input.ipHash,
-          language: input.language,
-          openedOk: input.openedOk,
-          os: input.os,
-          outcome: input.outcome,
-          qrCodeId: input.qrCodeId,
-          redirectRuleId: input.redirectRuleId,
-          referrer: input.referrer,
-          requestId: input.requestId,
-          scannedAt: input.scannedAt,
-          userAgent: input.userAgent
-        }
-      });
-
-      const day = new Date(input.scannedAt);
-      day.setUTCHours(0, 0, 0, 0);
-      const nextDay = new Date(day);
-      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-
-      const dayEvents = await tx.scanEvent.findMany({
-        where: {
-          qrCodeId: input.qrCodeId,
-          scannedAt: {
-            gte: day,
-            lt: nextDay
+  async recordScanEvent(input: ScanEventInput) {
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.scanEvent.create({
+          data: {
+            browser: input.browser,
+            city: null,
+            country: input.country,
+            deviceType: input.deviceType,
+            ipHash: input.ipHash,
+            language: input.language,
+            openedOk: input.openedOk,
+            os: input.os,
+            outcome: input.outcome,
+            qrCodeId: input.qrCodeId,
+            redirectRuleId: input.redirectRuleId,
+            referrer: input.referrer,
+            requestId: input.requestId,
+            scannedAt: input.scannedAt,
+            userAgent: input.userAgent
           }
-        },
-        select: {
-          browser: true,
-          country: true,
-          deviceType: true,
-          ipHash: true,
-          os: true
-        }
-      });
+        });
 
-      const devices = this.buildCounts(dayEvents.map((event) => event.deviceType));
-      const countries = this.buildCounts(dayEvents.map((event) => event.country));
-      const browsers = this.buildCounts(dayEvents.map((event) => event.browser));
-      const operatingSystems = this.buildCounts(dayEvents.map((event) => event.os));
+        const day = new Date(input.scannedAt);
+        day.setUTCHours(0, 0, 0, 0);
+        const nextDay = new Date(day);
+        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
 
-      await tx.scanAggregateDaily.upsert({
-        where: {
-          qrCodeId_day: {
+        const dayEvents = await tx.scanEvent.findMany({
+          where: {
+            qrCodeId: input.qrCodeId,
+            scannedAt: {
+              gte: day,
+              lt: nextDay
+            }
+          },
+          select: {
+            browser: true,
+            country: true,
+            deviceType: true,
+            ipHash: true,
+            os: true
+          }
+        });
+
+        const devices = this.buildCounts(dayEvents.map((event) => event.deviceType));
+        const countries = this.buildCounts(dayEvents.map((event) => event.country));
+        const browsers = this.buildCounts(dayEvents.map((event) => event.browser));
+        const operatingSystems = this.buildCounts(dayEvents.map((event) => event.os));
+
+        await tx.scanAggregateDaily.upsert({
+          where: {
+            qrCodeId_day: {
+              day,
+              qrCodeId: input.qrCodeId
+            }
+          },
+          create: {
+            browsers,
+            countries,
             day,
-            qrCodeId: input.qrCodeId
+            devices,
+            operatingSystems,
+            qrCodeId: input.qrCodeId,
+            scans: dayEvents.length,
+            uniqueDevices: new Set(
+              dayEvents
+                .map((event) => event.deviceType?.trim().toLowerCase())
+                .filter(Boolean)
+            ).size,
+            uniqueIps: new Set(
+              dayEvents.map((event) => event.ipHash).filter(Boolean)
+            ).size
+          },
+          update: {
+            browsers,
+            countries,
+            devices,
+            operatingSystems,
+            scans: dayEvents.length,
+            uniqueDevices: new Set(
+              dayEvents
+                .map((event) => event.deviceType?.trim().toLowerCase())
+                .filter(Boolean)
+            ).size,
+            uniqueIps: new Set(
+              dayEvents.map((event) => event.ipHash).filter(Boolean)
+            ).size
           }
-        },
-        create: {
-          browsers,
-          countries,
-          day,
-          devices,
-          operatingSystems,
+        });
+      });
+    } catch (error) {
+      if ((error as { code?: string })?.code === "P2002" && input.requestId) {
+        this.logger.warn(
+          "analytics.scan_duplicate_ignored",
+          {
+            qrCodeId: input.qrCodeId,
+            requestId: input.requestId
+          },
+          AnalyticsService.name
+        );
+        return;
+      }
+
+      this.logger.error(
+        "analytics.scan_record_failed",
+        error,
+        {
           qrCodeId: input.qrCodeId,
-          scans: dayEvents.length,
-          uniqueDevices: new Set(
-            dayEvents
-              .map((event) => event.deviceType?.trim().toLowerCase())
-              .filter(Boolean)
-          ).size,
-          uniqueIps: new Set(
-            dayEvents.map((event) => event.ipHash).filter(Boolean)
-          ).size
+          requestId: input.requestId
         },
-        update: {
-          browsers,
-          countries,
-          devices,
-          operatingSystems,
-          scans: dayEvents.length,
-          uniqueDevices: new Set(
-            dayEvents
-              .map((event) => event.deviceType?.trim().toLowerCase())
-              .filter(Boolean)
-          ).size,
-          uniqueIps: new Set(
-            dayEvents.map((event) => event.ipHash).filter(Boolean)
-          ).size
-        }
-      });
-    }).then(() => {
-      this.telemetry.track("analytics.scan_recorded", {
-        outcome: input.outcome,
-        qrCodeId: input.qrCodeId
-      });
+        AnalyticsService.name
+      );
+      throw error;
+    }
+
+    this.telemetry.track("analytics.scan_recorded", {
+      outcome: input.outcome,
+      qrCodeId: input.qrCodeId
     });
   }
 

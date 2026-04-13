@@ -336,7 +336,7 @@ model ScanEvent {
   openedOk       Boolean?
   outcome        ScanOutcome
   redirectRuleId String?     @db.Uuid
-  requestId      String?
+  requestId      String?     @unique
 
   qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
 

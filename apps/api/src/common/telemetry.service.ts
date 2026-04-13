@@ -1,16 +1,11 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
+import { StructuredLoggerService } from "./structured-logger.service";
 
 @Injectable()
 export class TelemetryService {
-  private readonly logger = new Logger("telemetry");
+  constructor(private readonly logger: StructuredLoggerService) {}
 
   track(event: string, payload: Record<string, unknown>) {
-    this.logger.log(
-      JSON.stringify({
-        event,
-        ...payload,
-        timestamp: new Date().toISOString()
-      })
-    );
+    this.logger.info(event, payload, "telemetry");
   }
 }

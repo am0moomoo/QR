@@ -1,101 +1,86 @@
 import {
   Injectable,
   InternalServerErrorException,
-  NotFoundException,
   OnModuleInit
 } from "@nestjs/common";
-import { promises as fs } from "node:fs";
-import * as path from "node:path";
-
-type StoredObject = {
-  absolutePath: string;
-  body: Buffer;
-  bytes: bigint;
-};
+import { StructuredLoggerService } from "./structured-logger.service";
+import { LocalStorageDriver } from "./storage/local-storage.driver";
+import { S3StorageDriver } from "./storage/s3-storage.driver";
+import type {
+  StorageDriver,
+  StorageDriverKind,
+  StoredObject
+} from "./storage/storage-driver";
 
 @Injectable()
 export class StorageService implements OnModuleInit {
-  async onModuleInit() {
-    if (this.getDriver() !== "local") {
-      throw new InternalServerErrorException(
-        `Unsupported storage driver "${this.getDriver()}". Only local storage is configured in this build.`
-      );
-    }
+  private driver: StorageDriver | null = null;
 
-    await fs.mkdir(this.getRootDirectory(), { recursive: true });
+  constructor(private readonly logger: StructuredLoggerService) {}
+
+  async onModuleInit() {
+    const driver = this.getDriverInstance();
+    await driver.initialize();
+    this.logger.info(
+      "storage.initialized",
+      {
+        driver: driver.kind
+      },
+      StorageService.name
+    );
   }
 
   async putObject(storageKey: string, body: Buffer | string) {
-    const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
-    const absolutePath = this.resolveStoragePath(storageKey);
-
-    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
-    await fs.writeFile(absolutePath, buffer);
-
-    return {
-      absolutePath,
-      bytes: BigInt(buffer.byteLength)
-    };
+    return this.getDriverInstance().putObject(storageKey, body);
   }
 
   async getObject(storageKey: string): Promise<StoredObject> {
-    const absolutePath = this.resolveStoragePath(storageKey);
-
-    try {
-      const body = await fs.readFile(absolutePath);
-
-      return {
-        absolutePath,
-        body,
-        bytes: BigInt(body.byteLength)
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
-        throw new NotFoundException("Stored asset was not found");
-      }
-
-      throw error;
-    }
+    return this.getDriverInstance().getObject(storageKey);
   }
 
   async deleteObject(storageKey: string) {
-    const absolutePath = this.resolveStoragePath(storageKey);
-
-    try {
-      await fs.unlink(absolutePath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-        throw error;
-      }
-    }
+    return this.getDriverInstance().deleteObject(storageKey);
   }
 
   async deleteObjects(storageKeys: string[]) {
-    for (const storageKey of storageKeys) {
-      await this.deleteObject(storageKey);
-    }
+    return this.getDriverInstance().deleteObjects(storageKeys);
   }
 
   getDriver() {
-    return (process.env.STORAGE_DRIVER ?? "local").trim().toLowerCase();
+    return this.getConfiguredDriver();
   }
 
-  private getRootDirectory() {
-    const configuredRoot = process.env.STORAGE_LOCAL_ROOT?.trim() || "./storage";
-    return path.isAbsolute(configuredRoot)
-      ? configuredRoot
-      : path.resolve(process.cwd(), configuredRoot);
-  }
-
-  private resolveStoragePath(storageKey: string) {
-    const normalizedKey = storageKey.replace(/\\/g, "/").replace(/^\/+/, "");
-    const rootDirectory = this.getRootDirectory();
-    const absolutePath = path.resolve(rootDirectory, normalizedKey);
-
-    if (!absolutePath.startsWith(rootDirectory)) {
-      throw new InternalServerErrorException("Invalid storage key");
+  private getDriverInstance() {
+    if (this.driver) {
+      return this.driver;
     }
 
-    return absolutePath;
+    const configuredDriver = this.getConfiguredDriver();
+
+    if (configuredDriver === "local") {
+      this.driver = new LocalStorageDriver();
+      return this.driver;
+    }
+
+    if (configuredDriver === "s3" || configuredDriver === "r2") {
+      this.driver = new S3StorageDriver(configuredDriver);
+      return this.driver;
+    }
+
+    throw new InternalServerErrorException(
+      `Unsupported storage driver "${configuredDriver}".`
+    );
+  }
+
+  private getConfiguredDriver(): StorageDriverKind {
+    const value = (process.env.STORAGE_DRIVER ?? "local").trim().toLowerCase();
+
+    if (value === "local" || value === "s3" || value === "r2") {
+      return value;
+    }
+
+    throw new InternalServerErrorException(
+      `Unsupported storage driver "${value}".`
+    );
   }
 }

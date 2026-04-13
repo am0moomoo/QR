@@ -5,13 +5,14 @@ import {
 } from "@nestjs/common";
 import { Prisma, ScanOutcome } from "@prisma/client";
 import { compare } from "bcryptjs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { type QrType, getQrTargetUrl } from "@qr/types";
 import type { Request } from "express";
-import { AnalyticsService } from "../../common/analytics.service";
 import { PrismaService } from "../../common/prisma.service";
+import { ScanEventQueueService } from "../../common/scan-event-queue.service";
 import { ScanRateLimitService } from "../../common/scan-rate-limit.service";
 import { SlugCacheService } from "../../common/slug-cache.service";
+import { StructuredLoggerService } from "../../common/structured-logger.service";
 import { TelemetryService } from "../../common/telemetry.service";
 
 type ScanRecord = Prisma.QRCodeGetPayload<{
@@ -54,7 +55,8 @@ export class ScanService {
     private readonly telemetry: TelemetryService,
     private readonly slugCache: SlugCacheService<ScanRecord>,
     private readonly scanRateLimit: ScanRateLimitService,
-    private readonly analytics: AnalyticsService
+    private readonly scanEvents: ScanEventQueueService,
+    private readonly logger: StructuredLoggerService
   ) {}
 
   async resolve(slug: string, request: Request, password?: string): Promise<ScanResult> {
@@ -333,7 +335,7 @@ export class ScanService {
     outcome: ScanOutcome,
     redirectRuleId?: string
   ) {
-    const scanWrite = this.analytics.recordScanEvent({
+    const scanWrite = this.scanEvents.recordScanEvent({
       browser: metadata.browser,
       country: metadata.country,
       deviceType: metadata.deviceType,
@@ -353,7 +355,18 @@ export class ScanService {
     if (process.env.SCAN_WRITE_SYNC === "true") {
       await scanWrite;
     } else {
-      void scanWrite.catch(() => undefined);
+      void scanWrite.catch((error) => {
+        this.logger.error(
+          "scan.outcome_record_failed",
+          error,
+          {
+            outcome,
+            qrCodeId: qrCode.id,
+            requestId: metadata.requestId
+          },
+          ScanService.name
+        );
+      });
     }
 
     this.telemetry.track("scan.resolved", {
@@ -439,7 +452,7 @@ export class ScanService {
       requestId:
         (Array.isArray(request.headers["x-request-id"])
           ? request.headers["x-request-id"][0]
-          : request.headers["x-request-id"]) ?? null,
+          : request.headers["x-request-id"]) ?? randomUUID(),
       userAgent
     };
   }

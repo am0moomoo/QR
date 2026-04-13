@@ -83,12 +83,25 @@ Update this file after each major Codex pass.
 
 ## Ops
 - [~] CI/CD
-- [ ] structured logs
+- [~] structured logs
 - [ ] metrics
 - [ ] traces
 - [ ] backups
 - [ ] load tests
 - [ ] security review
+
+## Production readiness
+- [~] local + S3/R2 storage abstraction
+- [~] queued render processing
+- [~] queued scan-event processing
+- [~] render/scan idempotency + retries
+- [!] notification delivery/jobs
+- [!] worker separation from API runtime
+
+## UI shipped vs backend-capable
+- shipped in UI: QR list, QR details, analytics, profile/settings
+- backend-capable only: Google OAuth, billing, API keys, webhooks, custom domains, folders/workspaces
+- intentionally not started in UI: billing polish, bulk import, folders/workspaces, custom domains, visual polish
 
 ## Notes
 - starter monorepo scaffold added
@@ -118,3 +131,8 @@ Update this file after each major Codex pass.
 - 2026-04-13: observed GitHub Actions run `ci #5` (`24323889571`) succeed on commit `9b0d5c2ac771ad4e006234447a1743361be95e4f`; passed job: `verify`
 - 2026-04-13: observed `verify` step success in GitHub Actions for `Install dependencies`, `Generate Prisma client`, `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, and `Dashboard end-to-end smoke`
 - 2026-04-13: exact end-to-end dashboard smoke flow verified green in GitHub Actions on `9b0d5c2ac771ad4e006234447a1743361be95e4f`: `register -> login -> create QR -> render PNG/SVG -> download availability -> scan slug -> QR list search/filter/sort -> QR details -> analytics -> profile/settings update`
+- 2026-04-13: dashboard-shell refactor completed; the oversized client shell is now split into focused dashboard components, a session hook, shared view state helpers, and smaller page-specific modules without changing dashboard routes or selectors
+- 2026-04-13: local verification for the maintainability pass completed with `@qr/web` typecheck/build, root `pnpm build`, root `pnpm lint`, root `pnpm typecheck`, `@qr/api build`, and `@qr/api test:unit`; `@qr/api test:integration` still honestly skips on this machine without live PostgreSQL/Redis
+- 2026-04-13: storage now goes through a driver abstraction that supports `local`, `s3`, and `r2` modes; only local storage is live-verified in this session, while S3/R2 remain code-wired but not yet exercised against a real bucket
+- 2026-04-13: QR asset rendering and scan-event persistence now run through queue-oriented services with Redis/BullMQ when available and inline fallbacks when Redis is absent; request-id idempotency is enforced for scan-event writes via the new `ScanEvent.requestId` unique index
+- 2026-04-13: remaining production blockers after this hardening pass: workers still run inside the API process instead of dedicated worker containers, notification delivery/queues are not implemented, aggregate recomputation is still row-scan based inside the scan-event processor, and metrics/traces/dead-letter monitoring are still missing

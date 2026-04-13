@@ -6,8 +6,12 @@ import { ScanController } from "./modules/scan/scan.controller";
 import { BillingController } from "./modules/billing/billing.controller";
 import { AuthController } from "./modules/auth/auth.controller";
 import { PrismaService } from "./common/prisma.service";
+import { QrAssetPipelineService } from "./common/qr-asset-pipeline.service";
 import { RedisService } from "./common/redis.service";
+import { RenderQueueService } from "./common/render-queue.service";
+import { ScanEventQueueService } from "./common/scan-event-queue.service";
 import { ScanRateLimitService } from "./common/scan-rate-limit.service";
+import { StructuredLoggerService } from "./common/structured-logger.service";
 import { TelemetryService } from "./common/telemetry.service";
 import { SlugCacheService } from "./common/slug-cache.service";
 import { StorageService } from "./common/storage.service";
@@ -31,6 +35,7 @@ import { ScanService } from "./modules/scan/scan.service";
     BillingController
   ],
   providers: [
+    StructuredLoggerService,
     PrismaService,
     RedisService,
     ScanRateLimitService,
@@ -38,7 +43,10 @@ import { ScanService } from "./modules/scan/scan.service";
     SlugCacheService,
     StorageService,
     QrRenderService,
+    QrAssetPipelineService,
     AnalyticsService,
+    RenderQueueService,
+    ScanEventQueueService,
     AuthService,
     QrCodesService,
     ScanService

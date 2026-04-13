@@ -1,21 +1,28 @@
 import {
   Injectable,
-  Logger,
   OnModuleDestroy,
   OnModuleInit
 } from "@nestjs/common";
 import Redis from "ioredis";
+import { StructuredLoggerService } from "./structured-logger.service";
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(RedisService.name);
   private client: Redis | null = null;
+
+  constructor(private readonly logger: StructuredLoggerService) {}
 
   async onModuleInit() {
     const redisUrl = process.env.REDIS_URL;
 
     if (!redisUrl) {
-      this.logger.warn("REDIS_URL is not configured; Redis-backed features will use fallback paths.");
+      this.logger.warn(
+        "redis.config_missing",
+        {
+          fallback: "in-process"
+        },
+        RedisService.name
+      );
       return;
     }
 
@@ -28,12 +35,21 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       await client.connect();
       this.client = client;
-      this.logger.log("Connected to Redis");
+      this.logger.info(
+        "redis.connected",
+        {
+          url: redisUrl
+        },
+        RedisService.name
+      );
     } catch (error) {
       this.logger.warn(
-        `Redis connection failed; falling back to in-process cache. ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        "redis.connection_failed",
+        {
+          fallback: "in-process",
+          message: error instanceof Error ? error.message : String(error)
+        },
+        RedisService.name
       );
       client.disconnect(false);
     }
@@ -80,6 +96,20 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async expire(key: string, ttlSeconds: number) {
     await this.client?.expire(key, ttlSeconds);
+  }
+
+  async setIfNotExists(key: string, value: string, ttlSeconds?: number) {
+    if (!this.client) {
+      return false;
+    }
+
+    if (ttlSeconds) {
+      const result = await this.client.set(key, value, "EX", ttlSeconds, "NX");
+      return result === "OK";
+    }
+
+    const result = await this.client.set(key, value, "NX");
+    return result === "OK";
   }
 
   buildKey(...parts: string[]) {

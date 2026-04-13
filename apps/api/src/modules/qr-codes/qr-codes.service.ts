@@ -25,9 +25,10 @@ import { z } from "zod";
 import { AnalyticsService } from "../../common/analytics.service";
 import { PrismaService } from "../../common/prisma.service";
 import {
-  QrRenderService,
-  type RenderedQrAsset
-} from "../../common/qr-render.service";
+  QrAssetPipelineService,
+  type QrCodeRecord
+} from "../../common/qr-asset-pipeline.service";
+import { RenderQueueService } from "../../common/render-queue.service";
 import { SlugCacheService } from "../../common/slug-cache.service";
 import { StorageService } from "../../common/storage.service";
 import { TelemetryService } from "../../common/telemetry.service";
@@ -46,30 +47,11 @@ const qrAnalyticsQuerySchema = z.object({
   to: z.string().optional()
 });
 
-type QrCodeRecord = Prisma.QRCodeGetPayload<{
-  include: {
-    assets: true;
-    content: true;
-    design: true;
-    redirectRules: true;
-    workspace: true;
-  };
-}>;
-
 type DownloadFileResponse = {
   body: Buffer;
   contentLength: bigint;
   contentType: string;
   fileName: string;
-};
-
-type StoredAssetDraft = {
-  bytes: bigint;
-  checksum: string;
-  format: AssetFormat;
-  heightPx: number;
-  storageKey: string;
-  widthPx: number;
 };
 
 @Injectable()
@@ -79,7 +61,8 @@ export class QrCodesService {
     private readonly telemetry: TelemetryService,
     private readonly slugCache: SlugCacheService<QrCodeRecord>,
     private readonly storage: StorageService,
-    private readonly qrRender: QrRenderService,
+    private readonly assetPipeline: QrAssetPipelineService,
+    private readonly renderQueue: RenderQueueService,
     private readonly analytics: AnalyticsService
   ) {}
 
@@ -204,9 +187,10 @@ export class QrCodesService {
       });
     });
 
-    const createdQr = await this.syncAssets(
-      qrCode,
-      input.exports ?? ["png", "svg"]
+    const createdQr = await this.renderQueue.render(
+      qrCode.id,
+      input.exports ?? ["png", "svg"],
+      qrCode.updatedAt.toISOString()
     );
 
     await this.slugCache.set(createdQr.slug, createdQr);
@@ -332,10 +316,11 @@ export class QrCodesService {
     });
 
     const finalQr =
-      designChanged || this.getExistingExportFormats(updatedQr).length === 0
-        ? await this.syncAssets(
-            updatedQr,
-            this.getExistingExportFormats(existingQr)
+      designChanged || this.assetPipeline.getExistingExportFormats(updatedQr).length === 0
+        ? await this.renderQueue.render(
+            updatedQr.id,
+            this.assetPipeline.getExistingExportFormats(existingQr),
+            updatedQr.updatedAt.toISOString()
           )
         : updatedQr;
 
@@ -393,12 +378,12 @@ export class QrCodesService {
     );
 
     if (!asset) {
-      const refreshed = await this.syncAssets(qrCode, [
-        ...new Set([
-          ...this.getExistingExportFormats(qrCode),
+      const refreshed = await this.renderQueue.render(qrCode.id, [
+          ...new Set([
+          ...this.assetPipeline.getExistingExportFormats(qrCode),
           normalizedFormat
         ])
-      ] as ExportFormat[]);
+      ] as ExportFormat[], qrCode.updatedAt.toISOString());
       asset = refreshed.assets.find(
         (currentAsset) =>
           currentAsset.kind === "QR_IMAGE" &&
@@ -422,9 +407,10 @@ export class QrCodesService {
 
   async render(userId: string, id: string) {
     const qrCode = await this.requireQrCodeAccess(id, userId);
-    const refreshed = await this.syncAssets(
-      qrCode,
-      this.getExistingExportFormats(qrCode)
+    const refreshed = await this.renderQueue.render(
+      qrCode.id,
+      this.assetPipeline.getExistingExportFormats(qrCode),
+      qrCode.updatedAt.toISOString()
     );
 
     this.telemetry.track("qr.render_requested", {
@@ -534,9 +520,10 @@ export class QrCodesService {
       });
     });
 
-    const duplicatedQr = await this.syncAssets(
-      duplicated,
-      this.getExistingExportFormats(qrCode)
+    const duplicatedQr = await this.renderQueue.render(
+      duplicated.id,
+      this.assetPipeline.getExistingExportFormats(qrCode),
+      duplicated.updatedAt.toISOString()
     );
 
     await this.slugCache.set(duplicatedQr.slug, duplicatedQr);
@@ -644,117 +631,6 @@ export class QrCodesService {
     return folder;
   }
 
-  private async syncAssets(
-    qrCode: QrCodeRecord,
-    requestedFormats: ExportFormat[]
-  ) {
-    const formats = this.getSupportedExportFormats(requestedFormats);
-    const oldStorageKeys = qrCode.assets
-      .filter((asset) => asset.kind === "QR_IMAGE")
-      .map((asset) => asset.storageKey);
-    const uploadedStorageKeys: string[] = [];
-    const renderedAssets: StoredAssetDraft[] = [];
-
-    try {
-      for (const format of formats) {
-        const renderedAsset = await this.qrRender.render({
-          design: this.toRenderDesign(qrCode.design),
-          format,
-          shortUrl: this.buildShortUrl(qrCode.slug),
-          slug: qrCode.slug
-        });
-        const storageKey = this.buildStorageKey(qrCode, renderedAsset);
-        await this.storage.putObject(storageKey, renderedAsset.body);
-        uploadedStorageKeys.push(storageKey);
-        renderedAssets.push({
-          bytes: renderedAsset.bytes,
-          checksum: renderedAsset.checksum,
-          format: renderedAsset.format,
-          heightPx: renderedAsset.heightPx,
-          storageKey,
-          widthPx: renderedAsset.widthPx
-        });
-      }
-
-      await this.prisma.$transaction(async (tx) => {
-        await tx.qRAsset.deleteMany({
-          where: {
-            kind: "QR_IMAGE",
-            qrCodeId: qrCode.id
-          }
-        });
-
-        if (renderedAssets.length > 0) {
-          await tx.qRAsset.createMany({
-            data: renderedAssets.map((asset) => ({
-              bytes: asset.bytes,
-              checksum: asset.checksum,
-              format: asset.format,
-              heightPx: asset.heightPx,
-              kind: "QR_IMAGE",
-              publicUrl: this.buildDownloadUrl(
-                qrCode.id,
-                asset.format.toLowerCase()
-              ),
-              qrCodeId: qrCode.id,
-              storageKey: asset.storageKey,
-              widthPx: asset.widthPx,
-              workspaceId: qrCode.workspaceId
-            }))
-          });
-        }
-      });
-    } catch (error) {
-      await this.storage.deleteObjects(uploadedStorageKeys);
-      throw error;
-    }
-
-    await this.storage.deleteObjects(
-      oldStorageKeys.filter(
-        (storageKey) => !uploadedStorageKeys.includes(storageKey)
-      )
-    );
-
-    return this.prisma.qRCode.findUniqueOrThrow({
-      where: { id: qrCode.id },
-      include: {
-        assets: true,
-        content: true,
-        design: true,
-        redirectRules: true,
-        workspace: true
-      }
-    });
-  }
-
-  private getSupportedExportFormats(
-    requestedFormats: ExportFormat[]
-  ): ExportFormat[] {
-    const uniqueFormats = [...new Set(requestedFormats)] as ExportFormat[];
-
-    if (uniqueFormats.some((format) => format !== "png" && format !== "svg")) {
-      throw new BadRequestException(
-        "Only png and svg exports are implemented in this build."
-      );
-    }
-
-    return uniqueFormats.length > 0
-      ? uniqueFormats
-      : (["png", "svg"] as ExportFormat[]);
-  }
-
-  private buildStorageKey(qrCode: QrCodeRecord, renderedAsset: RenderedQrAsset) {
-    return `qr/${qrCode.workspaceId}/${qrCode.id}/${renderedAsset.checksum}.${renderedAsset.extension}`;
-  }
-
-  private getExistingExportFormats(qrCode: QrCodeRecord): ExportFormat[] {
-    const formats = qrCode.assets
-      .filter((asset) => asset.kind === "QR_IMAGE")
-      .map((asset) => asset.format.toLowerCase() as ExportFormat);
-
-    return formats.length > 0 ? formats : ["png", "svg"];
-  }
-
   private toCreateQrResponse(qrCode: QrCodeRecord) {
     return {
       downloads: this.toDownloadItems(qrCode),
@@ -836,27 +712,6 @@ export class QrCodesService {
 
   private getContentTypeForAssetFormat(format: AssetFormat) {
     return format === AssetFormat.PNG ? "image/png" : "image/svg+xml";
-  }
-
-  private toRenderDesign(qrDesign: QrCodeRecord["design"]) {
-    if (!qrDesign) {
-      return null;
-    }
-
-    return {
-      backgroundColor: qrDesign.backgroundColor,
-      cornersInner: qrDesign.cornersInner,
-      cornersInnerColor: qrDesign.cornersInnerColor,
-      cornersOuter: qrDesign.cornersOuter,
-      cornersOuterColor: qrDesign.cornersOuterColor,
-      errorCorrection: qrDesign.errorCorrection as "L" | "M" | "Q" | "H",
-      logoAssetId: qrDesign.logoAssetId,
-      logoHideBg: qrDesign.logoHideBg,
-      pattern: qrDesign.pattern,
-      patternColor: qrDesign.patternColor,
-      quietZoneModules: qrDesign.quietZoneModules,
-      sizePx: qrDesign.sizePx
-    };
   }
 
   private toInputJson(value: Prisma.JsonValue) {

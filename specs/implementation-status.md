@@ -108,11 +108,19 @@ Update this file after each major Codex pass.
   - `verify-bullmq-runtime` observed green for `Apply migrations`, `Seed database`, and real Redis/BullMQ runtime verification
   - exact API/dashboard smoke flow observed green: `register -> login -> create QR -> render PNG/SVG -> download -> scan slug -> persist raw scan event -> update daily aggregate -> forgot/reset password -> update profile`, plus dashboard `QR list -> QR details -> analytics -> profile/settings`
   - exact BullMQ runtime flow observed green: queue-backed `create QR -> render job retry -> concurrent render dedupe -> scan-event job retry -> requestId idempotency -> aggregate job retry -> daily aggregate recompute`
+  - GitHub Actions run `ci #24` (`24334027215`) succeeded on commit `ea02b7e3ae833f48bdc355edd1a9fe47f8f96c8e`
+  - passed jobs on `ci #24`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
+  - observed skipped jobs on `ci #24`: `verify-real-bucket`, `verify-staging-smoke`
 - staging-verified:
   - none yet
-  - staging deployment files, manual workflow, and smoke script are prepared, but no staging URL, no live S3/R2 bucket, and no observed staging smoke run were available in this session
+  - staging deployment files, healthchecked compose services, manual workflow, and smoke script are prepared, but no staging URL and no observed staging smoke run were available in this session
+  - GitHub Actions job `verify-staging-smoke` was observed as `skipped` on `ci #24` because the repository did not expose `STAGING_API_URL`, `STAGING_APP_URL`, and `STAGING_WORKSPACE_ID`
+- real-bucket-verified:
+  - none yet
+  - the real-bucket smoke path now exists in `apps/api/src/integration/real-bucket.spec.ts` and the repository CI can attempt it through job `verify-real-bucket`
+  - GitHub Actions job `verify-real-bucket` was observed as `skipped` on `ci #24` because the repository did not expose the required `REAL_BUCKET_STORAGE_DRIVER` variable and live S3/R2 secrets together
 - MVP-only or not yet live-verified beyond CI:
-  - remote S3/R2 object storage lifecycle and signed-download redirects
+  - remote S3/R2 object storage lifecycle, signed-download redirects, and orphan cleanup against a live bucket
   - orphan cleanup as an operator-run maintenance task instead of scheduled retention automation
   - dedicated deployed worker container/process observed in staging
   - forgot/reset password in a production-like staging environment with real email delivery or a smoke mailbox
@@ -120,6 +128,7 @@ Update this file after each major Codex pass.
 - top remaining production blockers:
   - no observed staging deployment yet for `web`, `api`, `worker`, `postgres`, `redis`, and storage together
   - no observed S3/R2 verification yet for upload/download/render lifecycle, signed URL policy, or orphan cleanup against a real bucket
+  - the repo still needs real staging variables and real bucket secrets configured before GitHub Actions can move those optional jobs from `skipped` to observed execution
   - staging smoke currently requires an explicit `STAGING_SMOKE_WORKSPACE_ID` because workspace listing/management is intentionally still out of scope
   - billing, quotas, and Stripe flows remain intentionally untouched until staging truth exists
 
@@ -173,3 +182,8 @@ Update this file after each major Codex pass.
 - 2026-04-13: observed `verify-bullmq-runtime` job success in GitHub Actions for `Apply migrations`, `Seed database`, and `Queue runtime integration truth` after sanitizing BullMQ queue names and separating smoke teardown concerns
 - 2026-04-13: exact BullMQ runtime flow verified green in GitHub Actions on `f4b44467fdce50ca8b05f1c949da7a92eec10447`: queue-backed `create QR -> render retry -> concurrent render dedupe -> raw scan-event retry -> requestId idempotency -> aggregate retry -> daily aggregate recompute`
 - 2026-04-13: remaining production blockers after this pass: staging is still unverified, real S3/R2 verification is still unobserved, worker separation is prepared but not yet seen in a deployed environment, forgot/reset password still lacks a production-like smoke mailbox path, and metrics/traces/notification jobs/backups/security review are still missing
+- 2026-04-13: staging compose hardening now treats `migrate` as a one-shot job with no published port, adds API/web healthchecks, and makes the web service wait for a healthy API before starting
+- 2026-04-13: real S3/R2 verification is now codified in `apps/api/src/integration/real-bucket.spec.ts`; the flow checks render upload, signed download redirects, unsigned access denial, QR asset deletion, and orphan cleanup, but it still honestly skips without live bucket credentials
+- 2026-04-13: observed GitHub Actions run `ci #23` (`24333928557`) fail on commit `5786ab6a625a14dcbad7e497b8aaab9f6fd1a4e2` before jobs were created because optional verifier gating was wired in an invalid workflow shape
+- 2026-04-13: observed GitHub Actions run `ci #24` (`24334027215`) succeed on commit `ea02b7e3ae833f48bdc355edd1a9fe47f8f96c8e`; passed jobs: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`; observed skipped jobs: `verify-real-bucket`, `verify-staging-smoke`
+- 2026-04-13: local verification for the staging-prep pass completed with `pnpm.cmd build`, `pnpm.cmd lint`, `pnpm.cmd typecheck`, `pnpm.cmd --filter @qr/api test:unit`, `pnpm.cmd --filter @qr/api test:integration` skip-mode without live DB/Redis, and `pnpm.cmd --filter @qr/api test:integration:real-bucket` skip-mode without live bucket credentials

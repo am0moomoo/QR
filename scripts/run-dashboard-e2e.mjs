@@ -74,19 +74,29 @@ async function cleanup() {
 }
 
 async function main() {
+  console.log(`[dashboard-e2e] starting api server on ${apiUrl}`);
   const apiProcess = runProcess("api", ["--filter", "@qr/api", "start"], {
     API_PORT: process.env.API_PORT ?? "4000"
   });
+  console.log(`[dashboard-e2e] starting web server on ${appUrl}`);
   const webProcess = runProcess("web", ["--filter", "@qr/web", "start"]);
 
   try {
     await waitFor(apiHealthUrl);
+    console.log(`[dashboard-e2e] api ready: ${apiHealthUrl}`);
     await waitFor(dashboardUrl);
+    console.log(`[dashboard-e2e] web ready: ${dashboardUrl}`);
 
     const testExitCode = await new Promise((resolve) => {
       const playwright = spawn(
         pnpmCommand,
-        ["exec", "playwright", "test", "apps/web/e2e/dashboard.spec.ts"],
+        [
+          "exec",
+          "playwright",
+          "test",
+          "--workers=1",
+          "apps/web/e2e/dashboard.spec.ts"
+        ],
         {
           cwd: rootCwd,
           env: process.env,
@@ -98,6 +108,7 @@ async function main() {
     });
 
     if (testExitCode !== 0) {
+      console.error(`[dashboard-e2e] playwright exited with code ${testExitCode}`);
       process.exitCode = testExitCode;
     }
   } finally {

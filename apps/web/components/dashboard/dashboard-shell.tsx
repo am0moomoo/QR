@@ -388,7 +388,11 @@ function AuthPanel({
           </button>
         </div>
 
-        <form className="stack-lg" onSubmit={handleSubmit}>
+        <form
+          className="stack-lg"
+          data-testid="dashboard-auth-form"
+          onSubmit={handleSubmit}
+        >
           {mode === "register" ? (
             <div>
               <label className="label" htmlFor="dashboard-full-name">
@@ -437,7 +441,12 @@ function AuthPanel({
             <div className="callout danger">{formError ?? errorMessage}</div>
           ) : null}
 
-          <button className="button" disabled={isPending} type="submit">
+          <button
+            className="button"
+            data-testid="dashboard-auth-submit"
+            disabled={isPending}
+            type="submit"
+          >
             {isPending
               ? "Submitting..."
               : mode === "login"
@@ -571,7 +580,7 @@ function QrListView({
   }
 
   return (
-    <main className="stack-xl">
+    <main className="stack-xl" data-testid="qr-list-view">
       <section className="card">
         <div className="toolbar">
           <div>
@@ -677,7 +686,7 @@ function QrListView({
           </div>
         ) : (
           <div className="table-wrap">
-            <table className="table">
+            <table className="table" data-testid="qr-list-table">
               <thead>
                 <tr>
                   <th>QR code</th>
@@ -691,7 +700,7 @@ function QrListView({
               </thead>
               <tbody>
                 {filteredItems.map((qrCode) => (
-                  <tr key={qrCode.id}>
+                  <tr data-testid={`qr-row-${qrCode.id}`} key={qrCode.id}>
                     <td>
                       <div className="stack-sm">
                         <strong>{getQrDisplayName(qrCode)}</strong>
@@ -712,12 +721,14 @@ function QrListView({
                       <div className="table-actions">
                         <Link
                           className="button secondary compact"
+                          data-testid={`qr-details-link-${qrCode.id}`}
                           href={`/dashboard/qr/${qrCode.id}` as Route}
                         >
                           Details
                         </Link>
                         <Link
                           className="button secondary compact"
+                          data-testid={`qr-analytics-link-${qrCode.id}`}
                           href={`/dashboard/analytics?qr=${qrCode.id}` as Route}
                         >
                           Analytics
@@ -870,7 +881,7 @@ function QrDetailsView({
   ];
 
   return (
-    <main className="stack-xl">
+    <main className="stack-xl" data-testid="qr-details-view">
       <section className="card">
         <div className="toolbar">
           <div>
@@ -925,7 +936,7 @@ function QrDetailsView({
 
         {actionError ? <div className="callout danger">{actionError}</div> : null}
 
-        <div className="stats-grid">
+        <div className="stats-grid" data-testid="qr-details-summary">
           {summaryCards.map((card) => (
             <div className="card compact-card" key={card.label}>
               <div className="muted">{card.label}</div>
@@ -991,6 +1002,7 @@ function QrDetailsView({
                   </div>
                   <button
                     className="button secondary compact"
+                    data-testid={`qr-download-${download.format}`}
                     disabled={busyAction === download.format}
                     onClick={() => handleDownload(download)}
                     type="button"
@@ -1014,6 +1026,7 @@ function QrDetailsView({
             </div>
             <Link
               className="button secondary compact"
+              data-testid="open-analytics-page"
               href={`/dashboard/analytics?qr=${qrCode.id}` as Route}
             >
               Open analytics page
@@ -1264,7 +1277,7 @@ function AnalyticsView({
   const deviceTotals = analytics ? sumByKey(analytics.daily, "devices") : [];
 
   return (
-    <main className="stack-xl">
+    <main className="stack-xl" data-testid="analytics-view">
       <section className="card">
         <div className="toolbar">
           <div>
@@ -1339,7 +1352,7 @@ function AnalyticsView({
         </div>
       </section>
 
-      <section className="stats-grid">
+      <section className="stats-grid" data-testid="analytics-summary">
         <div className="card compact-card">
           <div className="muted">Selected QR</div>
           <div className="h2">{getQrDisplayName(selectedQr)}</div>
@@ -1486,7 +1499,7 @@ function SettingsView({
   }
 
   return (
-    <main className="stack-xl">
+    <main className="stack-xl" data-testid="settings-view">
       <section className="card">
         <span className="badge">Live /me endpoint</span>
         <h1 className="h2">Profile & settings</h1>
@@ -1497,7 +1510,11 @@ function SettingsView({
       </section>
 
       <section className="dashboard-split">
-        <form className="card stack-lg" onSubmit={handleSubmit}>
+        <form
+          className="card stack-lg"
+          data-testid="settings-form"
+          onSubmit={handleSubmit}
+        >
           <div>
             <label className="label" htmlFor="settings-full-name">
               Full name

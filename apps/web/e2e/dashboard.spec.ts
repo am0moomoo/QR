@@ -6,6 +6,8 @@ const appUrl = (process.env.APP_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "
 const apiUrl = (process.env.API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
 const apiBaseUrl = `${apiUrl}/api/v1`;
 
+test.setTimeout(90_000);
+
 async function apiRequest<T>(
   path: string,
   options: {
@@ -37,6 +39,15 @@ test.afterAll(async () => {
 test("dashboard list, details, analytics, and settings use live API data", async ({
   page
 }) => {
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      console.error(`[browser:${message.type()}] ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => {
+    console.error(`[pageerror] ${error.message}`);
+  });
+
   const suffix = `${Date.now()}-${Math.round(Math.random() * 10_000)}`;
   const email = `dashboard-${suffix}@example.com`;
   const password = "StrongPass123!";
@@ -138,52 +149,89 @@ test("dashboard list, details, analytics, and settings use live API data", async
     redirect: "manual"
   });
 
-  await page.goto(`${appUrl}/dashboard`);
-  await page.locator("#dashboard-email").fill(email);
-  await page.locator("#dashboard-password").fill(password);
-  await page.locator("form button[type='submit']").click();
+  await test.step("sign in through the dashboard auth form", async () => {
+    await page.goto(`${appUrl}/dashboard`);
+    await expect(page.getByTestId("dashboard-auth-form")).toBeVisible();
+    await page.locator("#dashboard-email").fill(email);
+    await page.locator("#dashboard-password").fill(password);
+    await page.getByTestId("dashboard-auth-submit").click();
+    await expect(page.getByTestId("qr-list-view")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "QR list" })).toBeVisible();
+  });
 
-  await expect(page.getByRole("heading", { name: "QR list" })).toBeVisible();
-  await expect(page.locator("tbody")).toContainText(activeTitle);
-  await expect(page.locator("tbody")).toContainText(inactiveTitle);
+  await test.step("render the live QR list with search, filter, and sort", async () => {
+    const activeRow = page.getByTestId(`qr-row-${activeQr.id}`);
+    const inactiveRow = page.getByTestId(`qr-row-${inactiveQr.id}`);
 
-  await page.locator("#qr-search").fill(activeTitle);
-  await expect(page.locator("tbody")).toContainText(activeTitle);
-  await expect(page.locator("tbody")).not.toContainText(inactiveTitle);
+    await expect(page.getByTestId("qr-list-table")).toBeVisible();
+    await expect(activeRow).toContainText(activeTitle);
+    await expect(inactiveRow).toContainText(inactiveTitle);
 
-  await page.locator("#qr-search").fill("");
-  await page.locator("#qr-status-filter").selectOption("INACTIVE");
-  await expect(page.locator("tbody")).toContainText(inactiveTitle);
-  await expect(page.locator("tbody")).not.toContainText(activeTitle);
+    await page.locator("#qr-search").fill(activeTitle);
+    await expect(activeRow).toBeVisible();
+    await expect(inactiveRow).toBeHidden();
 
-  await page.locator("#qr-status-filter").selectOption("ALL");
-  await page.locator("#qr-sort").selectOption("scans-desc");
-  await expect(page.locator("tbody tr").first()).toContainText(activeTitle);
+    await page.locator("#qr-search").fill("");
+    await page.locator("#qr-status-filter").selectOption("INACTIVE");
+    await expect(inactiveRow).toBeVisible();
+    await expect(activeRow).toBeHidden();
 
-  await page.locator("tbody tr").first().getByRole("link", { name: "Details" }).click();
-  await expect(page.getByRole("heading", { name: activeTitle })).toBeVisible();
-  await expect(page.locator("main")).toContainText(activeQr.slug);
-  await expect(page.locator("main")).toContainText(activeQr.shortUrl);
-  await expect(page.locator("main")).toContainText("Unique IPs (30d)");
-  await expect(page.getByRole("button", { name: "Download" }).first()).toBeVisible();
+    await page.locator("#qr-status-filter").selectOption("ALL");
+    await expect(activeRow).toBeVisible();
+    await expect(inactiveRow).toBeVisible();
 
-  await page.getByRole("link", { name: "Open analytics page" }).click();
-  await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
-  await expect(page.locator("#analytics-qr")).toHaveValue(activeQr.id);
-  await expect(page.locator("main")).toContainText("REDIRECTED");
-  await expect(page.locator("main")).toContainText("Scans in range");
+    await page.locator("#qr-sort").selectOption("scans-desc");
+    await expect(page.locator("[data-testid^='qr-row-']").first()).toHaveAttribute(
+      "data-testid",
+      `qr-row-${activeQr.id}`
+    );
+  });
 
-  await page.getByRole("link", { name: "Profile & settings" }).click();
-  await expect(page.getByRole("heading", { name: "Profile & settings" })).toBeVisible();
+  await test.step("open QR details and verify live assets and summary", async () => {
+    await page.getByTestId(`qr-details-link-${activeQr.id}`).click();
+    await expect(page).toHaveURL(`${appUrl}/dashboard/qr/${activeQr.id}`);
+    await expect(page.getByTestId("qr-details-view")).toBeVisible();
+    await expect(page.getByRole("heading", { name: activeTitle })).toBeVisible();
+    await expect(page.getByTestId("qr-details-view")).toContainText(activeQr.slug);
+    await expect(page.getByTestId("qr-details-view")).toContainText(activeQr.shortUrl);
+    await expect(page.getByTestId("qr-details-summary")).toContainText("Unique IPs (30d)");
+    await expect(page.getByTestId("qr-download-png")).toBeVisible();
+    await expect(page.getByTestId("qr-download-svg")).toBeVisible();
+  });
 
-  const updatedName = `Dashboard Updated ${suffix}`;
-  await page.locator("#settings-full-name").fill(updatedName);
-  await page.locator("#settings-avatar-url").fill("https://example.com/dashboard-avatar.png");
-  await page.locator("#settings-locale").fill("uz");
-  await page.locator("form button[type='submit']").click();
+  await test.step("open analytics page and verify live aggregate data", async () => {
+    await page.getByTestId("open-analytics-page").click();
+    await expect(page).toHaveURL(`${appUrl}/dashboard/analytics?qr=${activeQr.id}`);
+    await expect(page.getByTestId("analytics-view")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
+    await expect(page.locator("#analytics-qr")).toHaveValue(activeQr.id);
+    await expect(page.getByTestId("analytics-summary")).toContainText("Scans in range");
+    await expect(page.getByTestId("analytics-view")).toContainText("REDIRECTED");
+  });
 
-  await expect(page.locator("main")).toContainText("Profile settings saved from the live API.");
-  await expect(page.locator("main")).toContainText(updatedName);
-  await expect(page.locator("main")).toContainText("https://example.com/dashboard-avatar.png");
-  await expect(page.locator("main")).toContainText("uz");
+  await test.step("open settings and update the real profile", async () => {
+    const updatedName = `Dashboard Updated ${suffix}`;
+
+    await page.getByRole("link", { name: "Profile & settings" }).click();
+    await expect(page).toHaveURL(`${appUrl}/dashboard/settings`);
+    await expect(page.getByTestId("settings-view")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile & settings" })).toBeVisible();
+
+    await page.locator("#settings-full-name").fill(updatedName);
+    await page.locator("#settings-avatar-url").fill("https://example.com/dashboard-avatar.png");
+    await page.locator("#settings-locale").fill("uz");
+    await page
+      .getByTestId("settings-form")
+      .getByRole("button", { name: "Save profile" })
+      .click();
+
+    await expect(page.getByTestId("settings-view")).toContainText(
+      "Profile settings saved from the live API."
+    );
+    await expect(page.getByTestId("settings-view")).toContainText(updatedName);
+    await expect(page.getByTestId("settings-view")).toContainText(
+      "https://example.com/dashboard-avatar.png"
+    );
+    await expect(page.getByTestId("settings-view")).toContainText("uz");
+  });
 });

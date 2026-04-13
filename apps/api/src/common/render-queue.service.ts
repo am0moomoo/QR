@@ -158,6 +158,10 @@ export class RenderQueueService implements OnModuleDestroy {
       }
     );
 
+    await this.queue.waitUntilReady();
+    await this.queueEvents.waitUntilReady();
+    await this.worker.waitUntilReady();
+
     this.worker.on("failed", (job, error) => {
       this.logger.error(
         "render.job_failed",

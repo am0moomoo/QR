@@ -7,7 +7,8 @@ import * as path from "node:path";
 import type {
   StorageDriver,
   StoredObject,
-  StoredObjectMetadata
+  StoredObjectMetadata,
+  StoredObjectReference
 } from "./storage-driver";
 
 export class LocalStorageDriver implements StorageDriver {
@@ -66,6 +67,63 @@ export class LocalStorageDriver implements StorageDriver {
     for (const storageKey of storageKeys) {
       await this.deleteObject(storageKey);
     }
+  }
+
+  async getSignedDownloadUrl() {
+    return null;
+  }
+
+  async listObjects(prefix: string): Promise<StoredObjectReference[]> {
+    const normalizedPrefix = prefix.replace(/\\/g, "/").replace(/^\/+/, "");
+    const absolutePrefixPath = this.resolveStoragePath(normalizedPrefix);
+    const objects: StoredObjectReference[] = [];
+
+    try {
+      await fs.access(absolutePrefixPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+        return objects;
+      }
+
+      throw error;
+    }
+
+    const walk = async (directory: string) => {
+      const entries = await fs.readdir(directory, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(directory, entry.name);
+
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+          continue;
+        }
+
+        if (!entry.isFile()) {
+          continue;
+        }
+
+        objects.push({
+          key: path
+            .relative(this.getRootDirectory(), fullPath)
+            .replace(/\\/g, "/")
+        });
+      }
+    };
+
+    const stats = await fs.stat(absolutePrefixPath);
+
+    if (stats.isFile()) {
+      objects.push({
+        key: path
+          .relative(this.getRootDirectory(), absolutePrefixPath)
+          .replace(/\\/g, "/")
+      });
+      return objects;
+    }
+
+    await walk(absolutePrefixPath);
+    return objects;
   }
 
   private getRootDirectory() {

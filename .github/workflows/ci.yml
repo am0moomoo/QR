@@ -131,3 +131,78 @@ jobs:
           path: |
             playwright-report
             test-results
+
+  verify-bullmq-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      API_URL: http://127.0.0.1:4000
+      APP_URL: http://127.0.0.1:3000
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/qrflow?schema=public
+      IP_HASH_SALT: ci-ip-salt
+      JWT_SECRET: ci-jwt-secret
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:4000/api/v1
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+      NODE_ENV: test
+      QUEUE_DRIVER: bullmq
+      QUEUE_PREFIX: qrflow-ci
+      REDIS_KEY_PREFIX: qrflow-ci
+      REDIS_URL: redis://localhost:6379
+      REQUIRE_INTEGRATION_DB: "true"
+      RESET_TOKEN_TTL_MINUTES: "30"
+      SCAN_RATE_LIMIT_MAX_REQUESTS: "120"
+      SCAN_RATE_LIMIT_WINDOW_SECONDS: "60"
+      SCAN_WRITE_SYNC: "true"
+      SESSION_TTL_HOURS: "720"
+      SHORT_DOMAIN: http://localhost:4000
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_ROOT: ./storage/ci-queue-runtime
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: qrflow
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d qrflow"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.0.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply migrations
+        run: pnpm db:migrate:deploy
+
+      - name: Seed database
+        run: pnpm db:seed
+
+      - name: Queue runtime integration truth
+        run: pnpm --filter @qr/api test:integration:queue-runtime

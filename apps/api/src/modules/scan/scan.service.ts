@@ -336,6 +336,7 @@ export class ScanService {
     redirectRuleId?: string
   ) {
     const scanWrite = this.scanEvents.recordScanEvent({
+      awaitAggregate: process.env.SCAN_WRITE_SYNC === "true",
       browser: metadata.browser,
       country: metadata.country,
       deviceType: metadata.deviceType,

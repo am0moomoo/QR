@@ -9,7 +9,8 @@ import { S3StorageDriver } from "./storage/s3-storage.driver";
 import type {
   StorageDriver,
   StorageDriverKind,
-  StoredObject
+  StoredObject,
+  StoredObjectReference
 } from "./storage/storage-driver";
 
 @Injectable()
@@ -44,6 +45,17 @@ export class StorageService implements OnModuleInit {
 
   async deleteObjects(storageKeys: string[]) {
     return this.getDriverInstance().deleteObjects(storageKeys);
+  }
+
+  async getSignedDownloadUrl(storageKey: string, expiresInSeconds = 300) {
+    return this.getDriverInstance().getSignedDownloadUrl(
+      storageKey,
+      expiresInSeconds
+    );
+  }
+
+  async listObjects(prefix: string): Promise<StoredObjectReference[]> {
+    return this.getDriverInstance().listObjects(prefix);
   }
 
   getDriver() {

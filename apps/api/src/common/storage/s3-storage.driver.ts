@@ -6,14 +6,17 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   NoSuchKey,
   PutObjectCommand,
   S3Client
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type {
   StorageDriver,
   StoredObject,
-  StoredObjectMetadata
+  StoredObjectMetadata,
+  StoredObjectReference
 } from "./storage-driver";
 
 export class S3StorageDriver implements StorageDriver {
@@ -113,6 +116,49 @@ export class S3StorageDriver implements StorageDriver {
     for (const storageKey of storageKeys) {
       await this.deleteObject(storageKey);
     }
+  }
+
+  async getSignedDownloadUrl(storageKey: string, expiresInSeconds: number) {
+    return getSignedUrl(
+      this.client,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: storageKey
+      }),
+      {
+        expiresIn: expiresInSeconds
+      }
+    );
+  }
+
+  async listObjects(prefix: string): Promise<StoredObjectReference[]> {
+    const objects: StoredObjectReference[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const response = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          ContinuationToken: continuationToken,
+          Prefix: prefix
+        })
+      );
+
+      for (const item of response.Contents ?? []) {
+        if (!item.Key) {
+          continue;
+        }
+
+        objects.push({
+          etag: item.ETag ?? null,
+          key: item.Key
+        });
+      }
+
+      continuationToken = response.NextContinuationToken;
+    } while (continuationToken);
+
+    return objects;
   }
 
   private isNotFoundError(error: unknown) {

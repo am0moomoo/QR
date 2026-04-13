@@ -281,6 +281,8 @@ paths:
               schema:
                 type: string
                 format: binary
+        "302":
+          description: Signed object-storage redirect when remote private storage is enabled
 
   /qr-codes/{id}/render:
     post:

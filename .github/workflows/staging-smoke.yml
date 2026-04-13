@@ -1,0 +1,51 @@
+name: staging-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: Base API URL for the staging deployment.
+        required: true
+        type: string
+      app_url:
+        description: Base app URL for the staging deployment.
+        required: true
+        type: string
+      workspace_id:
+        description: Workspace UUID used for smoke-created QR codes.
+        required: true
+        type: string
+      expect_storage_redirect:
+        description: Whether QR download endpoints should redirect to signed object-storage URLs.
+        required: true
+        default: "true"
+        type: string
+      verify_reset_password:
+        description: Set to true only when staging exposes a reset token or a test mailbox flow.
+        required: true
+        default: "false"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Run staging smoke
+        run: node scripts/staging-smoke.mjs
+        env:
+          API_URL: ${{ inputs.api_url }}
+          APP_URL: ${{ inputs.app_url }}
+          STAGING_SMOKE_WORKSPACE_ID: ${{ inputs.workspace_id }}
+          STAGING_SMOKE_EXPECT_STORAGE_REDIRECT: ${{ inputs.expect_storage_redirect }}
+          STAGING_SMOKE_VERIFY_RESET_PASSWORD: ${{ inputs.verify_reset_password }}
+          STAGING_SMOKE_RESET_TOKEN: ${{ secrets.STAGING_SMOKE_RESET_TOKEN }}

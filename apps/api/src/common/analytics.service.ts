@@ -31,96 +31,26 @@ export class AnalyticsService {
     private readonly logger: StructuredLoggerService
   ) {}
 
-  async recordScanEvent(input: ScanEventInput) {
+  async recordRawScanEvent(input: ScanEventInput) {
     try {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.scanEvent.create({
-          data: {
-            browser: input.browser,
-            city: null,
-            country: input.country,
-            deviceType: input.deviceType,
-            ipHash: input.ipHash,
-            language: input.language,
-            openedOk: input.openedOk,
-            os: input.os,
-            outcome: input.outcome,
-            qrCodeId: input.qrCodeId,
-            redirectRuleId: input.redirectRuleId,
-            referrer: input.referrer,
-            requestId: input.requestId,
-            scannedAt: input.scannedAt,
-            userAgent: input.userAgent
-          }
-        });
-
-        const day = new Date(input.scannedAt);
-        day.setUTCHours(0, 0, 0, 0);
-        const nextDay = new Date(day);
-        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-
-        const dayEvents = await tx.scanEvent.findMany({
-          where: {
-            qrCodeId: input.qrCodeId,
-            scannedAt: {
-              gte: day,
-              lt: nextDay
-            }
-          },
-          select: {
-            browser: true,
-            country: true,
-            deviceType: true,
-            ipHash: true,
-            os: true
-          }
-        });
-
-        const devices = this.buildCounts(dayEvents.map((event) => event.deviceType));
-        const countries = this.buildCounts(dayEvents.map((event) => event.country));
-        const browsers = this.buildCounts(dayEvents.map((event) => event.browser));
-        const operatingSystems = this.buildCounts(dayEvents.map((event) => event.os));
-
-        await tx.scanAggregateDaily.upsert({
-          where: {
-            qrCodeId_day: {
-              day,
-              qrCodeId: input.qrCodeId
-            }
-          },
-          create: {
-            browsers,
-            countries,
-            day,
-            devices,
-            operatingSystems,
-            qrCodeId: input.qrCodeId,
-            scans: dayEvents.length,
-            uniqueDevices: new Set(
-              dayEvents
-                .map((event) => event.deviceType?.trim().toLowerCase())
-                .filter(Boolean)
-            ).size,
-            uniqueIps: new Set(
-              dayEvents.map((event) => event.ipHash).filter(Boolean)
-            ).size
-          },
-          update: {
-            browsers,
-            countries,
-            devices,
-            operatingSystems,
-            scans: dayEvents.length,
-            uniqueDevices: new Set(
-              dayEvents
-                .map((event) => event.deviceType?.trim().toLowerCase())
-                .filter(Boolean)
-            ).size,
-            uniqueIps: new Set(
-              dayEvents.map((event) => event.ipHash).filter(Boolean)
-            ).size
-          }
-        });
+      await this.prisma.scanEvent.create({
+        data: {
+          browser: input.browser,
+          city: null,
+          country: input.country,
+          deviceType: input.deviceType,
+          ipHash: input.ipHash,
+          language: input.language,
+          openedOk: input.openedOk,
+          os: input.os,
+          outcome: input.outcome,
+          qrCodeId: input.qrCodeId,
+          redirectRuleId: input.redirectRuleId,
+          referrer: input.referrer,
+          requestId: input.requestId,
+          scannedAt: input.scannedAt,
+          userAgent: input.userAgent
+        }
       });
     } catch (error) {
       if ((error as { code?: string })?.code === "P2002" && input.requestId) {
@@ -150,6 +80,82 @@ export class AnalyticsService {
     this.telemetry.track("analytics.scan_recorded", {
       outcome: input.outcome,
       qrCodeId: input.qrCodeId
+    });
+  }
+
+  async recomputeDailyAggregate(qrCodeId: string, scannedAt: Date) {
+    const day = new Date(scannedAt);
+    day.setUTCHours(0, 0, 0, 0);
+    const nextDay = new Date(day);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+
+    const dayEvents = await this.prisma.scanEvent.findMany({
+      where: {
+        qrCodeId,
+        scannedAt: {
+          gte: day,
+          lt: nextDay
+        }
+      },
+      select: {
+        browser: true,
+        country: true,
+        deviceType: true,
+        ipHash: true,
+        os: true
+      }
+    });
+
+    const devices = this.buildCounts(dayEvents.map((event) => event.deviceType));
+    const countries = this.buildCounts(dayEvents.map((event) => event.country));
+    const browsers = this.buildCounts(dayEvents.map((event) => event.browser));
+    const operatingSystems = this.buildCounts(dayEvents.map((event) => event.os));
+
+    await this.prisma.scanAggregateDaily.upsert({
+      where: {
+        qrCodeId_day: {
+          day,
+          qrCodeId
+        }
+      },
+      create: {
+        browsers,
+        countries,
+        day,
+        devices,
+        operatingSystems,
+        qrCodeId,
+        scans: dayEvents.length,
+        uniqueDevices: new Set(
+          dayEvents
+            .map((event) => event.deviceType?.trim().toLowerCase())
+            .filter(Boolean)
+        ).size,
+        uniqueIps: new Set(
+          dayEvents.map((event) => event.ipHash).filter(Boolean)
+        ).size
+      },
+      update: {
+        browsers,
+        countries,
+        devices,
+        operatingSystems,
+        scans: dayEvents.length,
+        uniqueDevices: new Set(
+          dayEvents
+            .map((event) => event.deviceType?.trim().toLowerCase())
+            .filter(Boolean)
+        ).size,
+        uniqueIps: new Set(
+          dayEvents.map((event) => event.ipHash).filter(Boolean)
+        ).size
+      }
+    });
+
+    this.telemetry.track("analytics.daily_aggregate_updated", {
+      day: day.toISOString().slice(0, 10),
+      qrCodeId,
+      scans: dayEvents.length
     });
   }
 

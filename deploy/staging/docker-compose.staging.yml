@@ -1,0 +1,115 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qrflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-qrflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: deploy/staging/Dockerfile.api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.staging
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-qrflow}?schema=public
+      NODE_ENV: production
+      QUEUE_DRIVER: bullmq
+      QUEUE_ROLE: producer
+      REDIS_URL: redis://redis:6379
+      STORAGE_DRIVER: ${STORAGE_DRIVER}
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+    command: ["pnpm", "db:migrate:deploy"]
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/staging/Dockerfile.api
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.staging
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-qrflow}?schema=public
+      NODE_ENV: production
+      QUEUE_DRIVER: bullmq
+      QUEUE_ROLE: producer
+      REDIS_URL: redis://redis:6379
+      STORAGE_DRIVER: ${STORAGE_DRIVER}
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+    command: ["pnpm", "--filter", "@qr/api", "start"]
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/staging/Dockerfile.api
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.staging
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-qrflow}?schema=public
+      NODE_ENV: production
+      QUEUE_DRIVER: bullmq
+      QUEUE_ROLE: both
+      REDIS_URL: redis://redis:6379
+      STORAGE_DRIVER: ${STORAGE_DRIVER}
+    restart: unless-stopped
+    command: ["pnpm", "--filter", "@qr/api", "start:worker"]
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/staging/Dockerfile.web
+    depends_on:
+      api:
+        condition: service_started
+    env_file:
+      - .env.staging
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -73,6 +73,9 @@ function createStorageStub() {
         files.delete(storageKey);
       }
     },
+    async getSignedDownloadUrl() {
+      return null;
+    },
     async getObject(storageKey: string) {
       const body = files.get(storageKey);
 
@@ -85,6 +88,11 @@ function createStorageStub() {
         body,
         bytes: BigInt(body.byteLength)
       };
+    },
+    async listObjects() {
+      return [...files.keys()].map((key) => ({
+        key
+      }));
     },
     async putObject(storageKey: string, body: Buffer | string) {
       const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
@@ -426,6 +434,7 @@ test("QrCodesService.create renders real download assets and returns stable shor
   assert.match(result.shortUrl, /\/r\/[A-Za-z0-9_-]+$/);
 
   const download = await service.download("user-1", qrCodeId, "png");
+  assert.equal(download.kind, "file");
   assert.equal(download.contentType, "image/png");
   assert.equal(download.body.toString(), "png-body");
 });

@@ -1,0 +1,12 @@
+.git
+.github
+.next
+.turbo
+coverage
+dist
+node_modules
+storage
+run-24323566006-logs
+.env
+.env.local
+.env.*.local

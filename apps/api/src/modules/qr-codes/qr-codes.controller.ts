@@ -69,6 +69,10 @@ export class QrCodesController {
 
     const download = await this.qrCodesService.download(user.id, id, format);
 
+    if (download.kind === "redirect") {
+      return response.redirect(302, download.redirectUrl);
+    }
+
     response.setHeader("Content-Length", download.contentLength.toString());
     response.setHeader(
       "Content-Disposition",

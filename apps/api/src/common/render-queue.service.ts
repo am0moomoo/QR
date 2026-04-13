@@ -1,5 +1,6 @@
 import {
   Injectable,
+  InternalServerErrorException,
   OnModuleDestroy
 } from "@nestjs/common";
 import { Queue, QueueEvents, Worker } from "bullmq";
@@ -18,9 +19,12 @@ type RenderJobData = {
   requestedFormats: ExportFormat[];
 };
 
+type QueueRole = "both" | "producer" | "worker";
+
 @Injectable()
 export class RenderQueueService implements OnModuleDestroy {
   private readonly inlineLocks = new Set<string>();
+  private readonly queueRole: QueueRole;
   private baseConnection: IORedis | null = null;
   private queue: Queue<RenderJobData> | null = null;
   private queueEvents: QueueEvents | null = null;
@@ -30,7 +34,9 @@ export class RenderQueueService implements OnModuleDestroy {
     private readonly redis: RedisService,
     private readonly logger: StructuredLoggerService,
     private readonly pipeline: QrAssetPipelineService
-  ) {}
+  ) {
+    this.queueRole = this.getQueueRole();
+  }
 
   async onModuleDestroy() {
     await Promise.all([
@@ -39,6 +45,14 @@ export class RenderQueueService implements OnModuleDestroy {
       this.queue?.close(),
       this.baseConnection?.quit()
     ]);
+  }
+
+  async warmup() {
+    if (!this.shouldUseBullMq()) {
+      return;
+    }
+
+    await this.ensureBullMq();
   }
 
   async render(
@@ -51,6 +65,12 @@ export class RenderQueueService implements OnModuleDestroy {
 
     if (!(await this.ensureBullMq())) {
       return this.runInline(qrCodeId, formats, jobId);
+    }
+
+    if (!this.canProduce()) {
+      throw new InternalServerErrorException(
+        "Render queue producer is disabled for this process."
+      );
     }
 
     const existingJob = await this.queue!.getJob(jobId);
@@ -113,7 +133,7 @@ export class RenderQueueService implements OnModuleDestroy {
   }
 
   private async ensureBullMq() {
-    if (this.queue && this.worker && this.queueEvents) {
+    if (this.queue && this.queueEvents && (!this.canConsume() || this.worker)) {
       return true;
     }
 
@@ -127,57 +147,66 @@ export class RenderQueueService implements OnModuleDestroy {
       return false;
     }
 
-    this.baseConnection = new IORedis(redisUrl, {
-      maxRetriesPerRequest: null
-    });
-    const workerConnection = this.baseConnection.duplicate();
-    const eventsConnection = this.baseConnection.duplicate();
-    const queueName = this.getQueueName();
+    if (!this.baseConnection) {
+      this.baseConnection = new IORedis(redisUrl, {
+        maxRetriesPerRequest: null
+      });
+    }
 
-    this.queue = new Queue(queueName, {
-      connection: this.baseConnection
-    });
-    this.queueEvents = new QueueEvents(queueName, {
-      connection: eventsConnection
-    });
-    this.worker = new Worker(
-      queueName,
-      async (job) => {
-        await this.runInline(
-          job.data.qrCodeId,
-          job.data.requestedFormats,
-          job.id ?? this.buildJobId(job.data.qrCodeId, "worker", job.data.requestedFormats)
-        );
+    if (!this.queue && this.canProduce()) {
+      this.queue = new Queue(this.getQueueName(), {
+        connection: this.baseConnection
+      });
+      this.queueEvents = new QueueEvents(this.getQueueName(), {
+        connection: this.baseConnection.duplicate()
+      });
+      await this.queue.waitUntilReady();
+      await this.queueEvents.waitUntilReady();
+    }
 
-        return {
-          qrCodeId: job.data.qrCodeId
-        };
-      },
-      {
-        connection: workerConnection
-      }
-    );
+    if (!this.worker && this.canConsume()) {
+      this.worker = new Worker(
+        this.getQueueName(),
+        async (job) => {
+          await this.runInline(
+            job.data.qrCodeId,
+            job.data.requestedFormats,
+            job.id ??
+              this.buildJobId(
+                job.data.qrCodeId,
+                "worker",
+                job.data.requestedFormats
+              )
+          );
 
-    await this.queue.waitUntilReady();
-    await this.queueEvents.waitUntilReady();
-    await this.worker.waitUntilReady();
-
-    this.worker.on("failed", (job, error) => {
-      this.logger.error(
-        "render.job_failed",
-        error,
-        {
-          jobId: job?.id ?? null,
-          qrCodeId: job?.data.qrCodeId ?? null
+          return {
+            qrCodeId: job.data.qrCodeId
+          };
         },
-        RenderQueueService.name
+        {
+          connection: this.baseConnection.duplicate()
+        }
       );
-    });
+
+      await this.worker.waitUntilReady();
+      this.worker.on("failed", (job, error) => {
+        this.logger.error(
+          "render.job_failed",
+          error,
+          {
+            jobId: job?.id ?? null,
+            qrCodeId: job?.data.qrCodeId ?? null
+          },
+          RenderQueueService.name
+        );
+      });
+    }
 
     this.logger.info(
       "render.queue_ready",
       {
-        queueName
+        queueName: this.getQueueName(),
+        role: this.queueRole
       },
       RenderQueueService.name
     );
@@ -202,6 +231,24 @@ export class RenderQueueService implements OnModuleDestroy {
   private getQueueName() {
     const prefix = process.env.QUEUE_PREFIX?.trim() || "qrflow";
     return `${prefix}:qr-render`;
+  }
+
+  private getQueueRole(): QueueRole {
+    const value = (process.env.QUEUE_ROLE ?? "both").trim().toLowerCase();
+
+    if (value === "worker" || value === "producer" || value === "both") {
+      return value;
+    }
+
+    return "both";
+  }
+
+  private canProduce() {
+    return this.queueRole === "both" || this.queueRole === "producer";
+  }
+
+  private canConsume() {
+    return this.queueRole === "both" || this.queueRole === "worker";
   }
 
   private buildJobId(

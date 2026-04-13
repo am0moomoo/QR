@@ -48,11 +48,21 @@ const qrAnalyticsQuerySchema = z.object({
 });
 
 type DownloadFileResponse = {
+  kind: "file";
   body: Buffer;
   contentLength: bigint;
   contentType: string;
   fileName: string;
 };
+
+type DownloadRedirectResponse = {
+  kind: "redirect";
+  contentType: string;
+  fileName: string;
+  redirectUrl: string;
+};
+
+type DownloadResponse = DownloadFileResponse | DownloadRedirectResponse;
 
 @Injectable()
 export class QrCodesService {
@@ -368,7 +378,7 @@ export class QrCodesService {
     };
   }
 
-  async download(userId: string, id: string, format: string): Promise<DownloadFileResponse> {
+  async download(userId: string, id: string, format: string): Promise<DownloadResponse> {
     const qrCode = await this.requireQrCodeAccess(id, userId);
     const normalizedFormat = this.normalizeDownloadFormat(format);
     let asset = qrCode.assets.find(
@@ -395,13 +405,28 @@ export class QrCodesService {
       throw new NotFoundException("QR download was not generated");
     }
 
+    const signedDownloadUrl = await this.storage.getSignedDownloadUrl(
+      asset.storageKey,
+      this.getSignedUrlTtlSeconds()
+    );
+
+    if (signedDownloadUrl) {
+      return {
+        contentType: this.getContentTypeForAssetFormat(asset.format),
+        fileName: `${qrCode.slug}.${normalizedFormat}`,
+        kind: "redirect",
+        redirectUrl: signedDownloadUrl
+      };
+    }
+
     const storedObject = await this.storage.getObject(asset.storageKey);
 
     return {
       body: storedObject.body,
       contentLength: storedObject.bytes,
       contentType: this.getContentTypeForAssetFormat(asset.format),
-      fileName: `${qrCode.slug}.${normalizedFormat}`
+      fileName: `${qrCode.slug}.${normalizedFormat}`,
+      kind: "file"
     };
   }
 
@@ -712,6 +737,11 @@ export class QrCodesService {
 
   private getContentTypeForAssetFormat(format: AssetFormat) {
     return format === AssetFormat.PNG ? "image/png" : "image/svg+xml";
+  }
+
+  private getSignedUrlTtlSeconds() {
+    const rawValue = Number(process.env.STORAGE_SIGNED_URL_TTL_SECONDS ?? "300");
+    return Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 300;
   }
 
   private toInputJson(value: Prisma.JsonValue) {

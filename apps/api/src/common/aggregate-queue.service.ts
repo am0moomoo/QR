@@ -191,8 +191,11 @@ export class AggregateQueueService implements OnModuleDestroy {
   }
 
   private getQueueName() {
-    const prefix = process.env.QUEUE_PREFIX?.trim() || "qrflow";
-    return `${prefix}:scan-aggregates`;
+    const prefix = (process.env.QUEUE_PREFIX?.trim() || "qrflow").replace(
+      /[:\s]+/g,
+      "-"
+    );
+    return `${prefix}-scan-aggregates`;
   }
 
   private buildJobId(qrCodeId: string, day: Date) {

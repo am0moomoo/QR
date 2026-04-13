@@ -229,8 +229,11 @@ export class RenderQueueService implements OnModuleDestroy {
   }
 
   private getQueueName() {
-    const prefix = process.env.QUEUE_PREFIX?.trim() || "qrflow";
-    return `${prefix}:qr-render`;
+    const prefix = (process.env.QUEUE_PREFIX?.trim() || "qrflow").replace(
+      /[:\s]+/g,
+      "-"
+    );
+    return `${prefix}-qr-render`;
   }
 
   private getQueueRole(): QueueRole {

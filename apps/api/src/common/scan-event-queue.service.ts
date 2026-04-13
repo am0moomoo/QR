@@ -221,8 +221,11 @@ export class ScanEventQueueService implements OnModuleDestroy {
   }
 
   private getQueueName() {
-    const prefix = process.env.QUEUE_PREFIX?.trim() || "qrflow";
-    return `${prefix}:scan-events`;
+    const prefix = (process.env.QUEUE_PREFIX?.trim() || "qrflow").replace(
+      /[:\s]+/g,
+      "-"
+    );
+    return `${prefix}-scan-events`;
   }
 
   private getQueueRole(): QueueRole {

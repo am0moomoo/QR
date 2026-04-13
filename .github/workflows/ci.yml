@@ -221,11 +221,16 @@ jobs:
           if not log_path.exists():
               raise SystemExit(0)
 
-          for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-80:]:
-              escaped = (
-                  line.replace("%", "%25")
-                  .replace("\r", "%0D")
-                  .replace("\n", "%0A")
-              )
-              print(f"::error file=apps/api/src/integration/queue-runtime.spec.ts,line=1::{escaped}")
+          tail = "\n".join(
+              log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-120:]
+          )
+          escaped = (
+              tail.replace("%", "%25")
+              .replace("\r", "%0D")
+              .replace("\n", "%0A")
+          )
+          print(
+              "::error file=apps/api/src/integration/queue-runtime.spec.ts,line=1::"
+              + escaped
+          )
           PY

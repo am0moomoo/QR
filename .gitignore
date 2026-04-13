@@ -11,7 +11,7 @@ apps/*/.next
 apps/*/dist
 prisma/dev.db
 .DS_Store
-storage
+/storage
 .turbo
 apps/*/.turbo
 apps/*/tsconfig.tsbuildinfo

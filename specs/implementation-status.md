@@ -103,6 +103,10 @@ Update this file after each major Codex pass.
 
 ## Verification truth
 - CI-verified:
+  - GitHub Actions run `ci #26` (`24360011778`) succeeded on commit `a301422f3f32e25618509896f6c84bd4520f2774`
+  - passed jobs on `ci #26`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
+  - observed skipped jobs on `ci #26`: `verify-staging-smoke`, `verify-real-bucket`
+  - exact create-flow/dashboard smoke observed green on `ci #26`: `register -> login -> create link QR -> render PNG/SVG -> download -> truthful empty dashboard state -> generator create -> dashboard list row -> search/filter/sort -> QR details -> analytics -> profile/settings`
   - GitHub Actions run `ci #21` (`24332531431`) succeeded on commit `f4b44467fdce50ca8b05f1c949da7a92eec10447`
   - passed jobs: `verify`, `verify-bullmq-runtime`
   - `verify` observed green for `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, `Dashboard end-to-end smoke`

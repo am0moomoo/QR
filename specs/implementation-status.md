@@ -83,6 +83,8 @@ Update this file after each major Codex pass.
 
 ## Ops
 - [~] CI/CD
+- [~] staging deployment target
+- [~] staging smoke workflow
 - [~] structured logs
 - [ ] metrics
 - [ ] traces
@@ -92,11 +94,34 @@ Update this file after each major Codex pass.
 
 ## Production readiness
 - [~] local + S3/R2 storage abstraction
-- [~] queued render processing
-- [~] queued scan-event processing
-- [~] render/scan idempotency + retries
+- [x] queued render processing
+- [x] queued scan-event processing
+- [x] render/scan idempotency + retries
 - [!] notification delivery/jobs
-- [!] worker separation from API runtime
+- [~] worker separation from API runtime
+
+## Verification truth
+- CI-verified:
+  - GitHub Actions run `ci #21` (`24332531431`) succeeded on commit `f4b44467fdce50ca8b05f1c949da7a92eec10447`
+  - passed jobs: `verify`, `verify-bullmq-runtime`
+  - `verify` observed green for `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, `Dashboard end-to-end smoke`
+  - `verify-bullmq-runtime` observed green for `Apply migrations`, `Seed database`, and real Redis/BullMQ runtime verification
+  - exact API/dashboard smoke flow observed green: `register -> login -> create QR -> render PNG/SVG -> download -> scan slug -> persist raw scan event -> update daily aggregate -> forgot/reset password -> update profile`, plus dashboard `QR list -> QR details -> analytics -> profile/settings`
+  - exact BullMQ runtime flow observed green: queue-backed `create QR -> render job retry -> concurrent render dedupe -> scan-event job retry -> requestId idempotency -> aggregate job retry -> daily aggregate recompute`
+- staging-verified:
+  - none yet
+  - staging deployment files, manual workflow, and smoke script are prepared, but no staging URL, no live S3/R2 bucket, and no observed staging smoke run were available in this session
+- MVP-only or not yet live-verified beyond CI:
+  - remote S3/R2 object storage lifecycle and signed-download redirects
+  - orphan cleanup as an operator-run maintenance task instead of scheduled retention automation
+  - dedicated deployed worker container/process observed in staging
+  - forgot/reset password in a production-like staging environment with real email delivery or a smoke mailbox
+  - metrics, traces, dead-letter handling, notification jobs, backup strategy, and security review
+- top remaining production blockers:
+  - no observed staging deployment yet for `web`, `api`, `worker`, `postgres`, `redis`, and storage together
+  - no observed S3/R2 verification yet for upload/download/render lifecycle, signed URL policy, or orphan cleanup against a real bucket
+  - staging smoke currently requires an explicit `STAGING_SMOKE_WORKSPACE_ID` because workspace listing/management is intentionally still out of scope
+  - billing, quotas, and Stripe flows remain intentionally untouched until staging truth exists
 
 ## UI shipped vs backend-capable
 - shipped in UI: QR list, QR details, analytics, profile/settings
@@ -141,5 +166,10 @@ Update this file after each major Codex pass.
 - 2026-04-13: observed GitHub Actions run `ci #12` (`24325439997`) succeed on commit `1a8a52d3022b8c33bf366e7d40d2947c38ca2ad7`; passed job: `verify`
 - 2026-04-13: observed `verify` step success in GitHub Actions for `Run actions/checkout@v5`, `Run actions/setup-node@v6`, `Enable Corepack`, `Install dependencies`, `Generate Prisma client`, `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, and `Dashboard end-to-end smoke`
 - 2026-04-13: exact end-to-end smoke flows verified green in GitHub Actions on `1a8a52d3022b8c33bf366e7d40d2947c38ca2ad7`: backend `register -> login -> create QR -> render PNG/SVG -> download -> scan slug -> persist raw scan event -> update daily aggregate -> forgot/reset password -> update profile`, plus dashboard `register -> login -> create QR -> render PNG/SVG -> download availability -> scan slug -> QR list search/filter/sort -> QR details -> analytics -> profile/settings update`
-- 2026-04-13: CI is intentionally pinned to `QUEUE_DRIVER=inline` for deterministic smoke/e2e verification; BullMQ-backed queue code remains shipped in runtime but is not yet truthfully marked as live-verified in CI
-- 2026-04-13: remaining production blockers after this hardening pass: dedicated worker processes/containers are still missing, BullMQ path is not yet CI-verified end-to-end, notification delivery/queues are not implemented, aggregate recomputation is still row-scan based inside the scan-event processor, and metrics/traces/dead-letter monitoring are still missing
+- 2026-04-13: the main `verify` CI job stays pinned to `QUEUE_DRIVER=inline` for deterministic app/dashboard smoke, while the dedicated `verify-bullmq-runtime` job now truthfully exercises the BullMQ path with real PostgreSQL + Redis service containers
+- 2026-04-13: storage now supports signed-download redirects for private `s3`/`r2` buckets while keeping stable authenticated `/api/v1/qr-codes/{id}/downloads?format=png|svg` URLs; only the local-storage path is observed on this machine
+- 2026-04-13: staging deployment scaffolding was added under `deploy/staging/` with separate `api`, `worker`, and `migrate` services plus a manual `staging-smoke` GitHub workflow and `scripts/staging-smoke.mjs`; this staging path is prepared but not yet observed against a live target
+- 2026-04-13: observed GitHub Actions run `ci #21` (`24332531431`) succeed on commit `f4b44467fdce50ca8b05f1c949da7a92eec10447`; passed jobs: `verify`, `verify-bullmq-runtime`
+- 2026-04-13: observed `verify-bullmq-runtime` job success in GitHub Actions for `Apply migrations`, `Seed database`, and `Queue runtime integration truth` after sanitizing BullMQ queue names and separating smoke teardown concerns
+- 2026-04-13: exact BullMQ runtime flow verified green in GitHub Actions on `f4b44467fdce50ca8b05f1c949da7a92eec10447`: queue-backed `create QR -> render retry -> concurrent render dedupe -> raw scan-event retry -> requestId idempotency -> aggregate retry -> daily aggregate recompute`
+- 2026-04-13: remaining production blockers after this pass: staging is still unverified, real S3/R2 verification is still unobserved, worker separation is prepared but not yet seen in a deployed environment, forgot/reset password still lacks a production-like smoke mailbox path, and metrics/traces/notification jobs/backups/security review are still missing

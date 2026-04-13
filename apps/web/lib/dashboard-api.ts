@@ -2,6 +2,7 @@
 
 export type DashboardUser = {
   avatarUrl: string | null;
+  defaultWorkspaceId: string | null;
   email: string;
   fullName: string | null;
   id: string;
@@ -48,6 +49,14 @@ export type DashboardQrListResponse = {
   page: number;
   pageSize: number;
   total: number;
+};
+
+export type DashboardCreatedQrCode = {
+  downloads: DashboardDownload[];
+  id: string;
+  shortUrl: string;
+  slug: string;
+  status: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "DELETED";
 };
 
 export type DashboardAnalyticsSummary = {
@@ -266,6 +275,47 @@ export async function listDashboardQrCodes(
 
 export async function getDashboardQrCode(token: string, qrId: string) {
   return dashboardRequest<DashboardQrCode>(`/qr-codes/${qrId}`, { token });
+}
+
+export async function createDashboardQrCode(
+  token: string,
+  payload: {
+    content: {
+      link: string;
+    };
+    design: {
+      backgroundColor: string;
+      cornersInner: string;
+      cornersInnerColor: string;
+      cornersOuter: string;
+      cornersOuterColor: string;
+      errorCorrection: "L" | "M" | "Q" | "H";
+      logoAssetId: string | null;
+      logoHideBg: boolean;
+      pattern: string;
+      patternColor: string;
+      quietZoneModules: number;
+      sizePx: number;
+    };
+    exports: Array<"png" | "svg">;
+    settings: {
+      adsEnabled: boolean;
+      doNotIndex: boolean;
+      expiresAt: string | null;
+      isOneTime: boolean;
+      maxScans: number | null;
+      password: string | null;
+    };
+    title: string | null;
+    type: "link";
+    workspaceId: string;
+  }
+) {
+  return dashboardRequest<DashboardCreatedQrCode>("/qr-codes", {
+    body: payload,
+    method: "POST",
+    token
+  });
 }
 
 export async function getDashboardQrAnalytics(

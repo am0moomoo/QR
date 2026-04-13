@@ -88,7 +88,9 @@ export class AuthService {
 
     return {
       accessToken: session.token,
-      user: this.serializeUser(user)
+      user: this.serializeUser(user, {
+        defaultWorkspaceId: user.id ? (await this.getDefaultWorkspaceIdForUser(user.id)) : null
+      })
     };
   }
 
@@ -117,7 +119,9 @@ export class AuthService {
 
     return {
       accessToken: session.token,
-      user: this.serializeUser(user)
+      user: this.serializeUser(user, {
+        defaultWorkspaceId: await this.getDefaultWorkspaceIdForUser(user.id)
+      })
     };
   }
 
@@ -166,9 +170,15 @@ export class AuthService {
     return session;
   }
 
-  serializeUser(user: User) {
+  serializeUser(
+    user: User,
+    options: {
+      defaultWorkspaceId?: string | null;
+    } = {}
+  ) {
     return {
       avatarUrl: user.avatarUrl,
+      defaultWorkspaceId: options.defaultWorkspaceId ?? null,
       email: user.email,
       fullName: user.fullName,
       id: user.id,
@@ -284,7 +294,9 @@ export class AuthService {
 
     return {
       accessToken: session.token,
-      user: this.serializeUser(token.user)
+      user: this.serializeUser(token.user, {
+        defaultWorkspaceId: await this.getDefaultWorkspaceIdForUser(token.userId)
+      })
     };
   }
 
@@ -305,7 +317,9 @@ export class AuthService {
       userId
     });
 
-    return this.serializeUser(user);
+    return this.serializeUser(user, {
+      defaultWorkspaceId: await this.getDefaultWorkspaceIdForUser(userId)
+    });
   }
 
   private async createSession(userId: string) {
@@ -346,6 +360,38 @@ export class AuthService {
 
   private shouldExposeResetToken() {
     return process.env.NODE_ENV !== "production";
+  }
+
+  async getDefaultWorkspaceIdForUser(userId: string) {
+    const ownedWorkspace = await this.prisma.workspace.findFirst({
+      where: {
+        ownerUserId: userId
+      },
+      orderBy: {
+        createdAt: "asc"
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (ownedWorkspace) {
+      return ownedWorkspace.id;
+    }
+
+    const membership = await this.prisma.workspaceMember.findFirst({
+      where: {
+        userId
+      },
+      orderBy: {
+        createdAt: "asc"
+      },
+      select: {
+        workspaceId: true
+      }
+    });
+
+    return membership?.workspaceId ?? null;
   }
 
   private async generateUniqueWorkspaceSlug(

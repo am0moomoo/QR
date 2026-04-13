@@ -1,0 +1,327 @@
+"use client";
+
+import Link from "next/link";
+import { useState, useTransition } from "react";
+import {
+  createDashboardQrCode,
+  downloadDashboardQrAsset,
+  getDashboardQrCode,
+  type DashboardQrCode
+} from "../../lib/dashboard-api";
+import { DashboardAuthPanel } from "../dashboard/dashboard-auth-panel";
+import { ErrorState, LoadingState } from "../dashboard/dashboard-state";
+import { useDashboardSession } from "../dashboard/use-dashboard-session";
+import { normalizeFieldValue, toErrorMessage } from "../dashboard/dashboard-utils";
+
+const defaultDesign = {
+  backgroundColor: "#ffffff",
+  cornersInner: "square",
+  cornersInnerColor: "#111111",
+  cornersOuter: "square",
+  cornersOuterColor: "#111111",
+  errorCorrection: "M" as const,
+  logoAssetId: null,
+  logoHideBg: true,
+  pattern: "square",
+  patternColor: "#111111",
+  quietZoneModules: 4,
+  sizePx: 512
+};
+
+const defaultSettings = {
+  adsEnabled: true,
+  doNotIndex: false,
+  expiresAt: null,
+  isOneTime: false,
+  maxScans: null,
+  password: null
+};
+
+export function LinkGenerator() {
+  const {
+    handleAuthenticated,
+    sessionState
+  } = useDashboardSession();
+  const [title, setTitle] = useState("Launch QR");
+  const [link, setLink] = useState("https://example.com/launch");
+  const [patternColor, setPatternColor] = useState("#111111");
+  const [backgroundColor, setBackgroundColor] = useState("#ffffff");
+  const [errorCorrection, setErrorCorrection] = useState<"L" | "M" | "Q" | "H">("M");
+  const [createdQr, setCreatedQr] = useState<DashboardQrCode | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [busyDownload, setBusyDownload] = useState<"png" | "svg" | null>(null);
+  const [isCreating, startCreateTransition] = useTransition();
+
+  if (sessionState.status === "booting") {
+    return (
+      <LoadingState
+        body="Checking whether a dashboard session already exists for the generator."
+        title="Loading generator"
+      />
+    );
+  }
+
+  if (sessionState.status === "unauthenticated") {
+    return (
+      <DashboardAuthPanel
+        errorMessage={sessionState.errorMessage}
+        onAuthenticated={handleAuthenticated}
+      />
+    );
+  }
+
+  const authenticatedSession =
+    sessionState.status === "ready" ? sessionState : null;
+
+  if (!authenticatedSession?.user.defaultWorkspaceId) {
+    return (
+      <ErrorState
+        body="This account does not expose a default workspace yet, so the generator cannot create a QR code."
+        title="Workspace is unavailable"
+      />
+    );
+  }
+
+  function handleCreate() {
+    setCreateError(null);
+    setDownloadError(null);
+
+    startCreateTransition(async () => {
+      if (!authenticatedSession) {
+        setCreateError("The generator session is not ready yet.");
+        return;
+      }
+
+      const workspaceId = authenticatedSession.user.defaultWorkspaceId;
+
+      if (!workspaceId) {
+        setCreateError("No default workspace is available for this account.");
+        return;
+      }
+
+      try {
+        const created = await createDashboardQrCode(authenticatedSession.token, {
+          content: {
+            link
+          },
+          design: {
+            ...defaultDesign,
+            backgroundColor,
+            errorCorrection,
+            patternColor
+          },
+          exports: ["png", "svg"],
+          settings: defaultSettings,
+          title: normalizeFieldValue(title),
+          type: "link",
+          workspaceId
+        });
+
+        const qrCode = await getDashboardQrCode(
+          authenticatedSession.token,
+          created.id
+        );
+        setCreatedQr(qrCode);
+      } catch (error) {
+        setCreateError(toErrorMessage(error));
+      }
+    });
+  }
+
+  async function handleDownload(format: "png" | "svg") {
+    if (!createdQr || !authenticatedSession) {
+      return;
+    }
+
+    setBusyDownload(format);
+    setDownloadError(null);
+
+    try {
+      const file = await downloadDashboardQrAsset(
+        authenticatedSession.token,
+        createdQr.id,
+        format
+      );
+      const objectUrl = window.URL.createObjectURL(file.blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = file.fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      setDownloadError(toErrorMessage(error));
+    } finally {
+      setBusyDownload(null);
+    }
+  }
+
+  return (
+    <main className="stack-xl" data-testid="generator-view">
+      <section className="card">
+        <div className="toolbar">
+          <div>
+            <span className="badge">Live create flow</span>
+            <h1 className="h2">Create a link QR</h1>
+            <p className="muted">
+              This form calls the real QR create endpoint and then reloads the created
+              record from the backend.
+            </p>
+          </div>
+          <Link className="button secondary" href="/dashboard">
+            Open dashboard
+          </Link>
+        </div>
+
+        <div className="form-grid">
+          <div>
+            <label className="label" htmlFor="generator-title">
+              Title
+            </label>
+            <input
+              className="input"
+              data-testid="generator-title"
+              id="generator-title"
+              onChange={(event) => setTitle(event.target.value)}
+              value={title}
+            />
+          </div>
+
+          <div>
+            <label className="label" htmlFor="generator-link">
+              Target URL
+            </label>
+            <input
+              className="input"
+              data-testid="generator-link"
+              id="generator-link"
+              onChange={(event) => setLink(event.target.value)}
+              type="url"
+              value={link}
+            />
+          </div>
+
+          <div>
+            <label className="label" htmlFor="generator-pattern-color">
+              Foreground color
+            </label>
+            <input
+              className="input"
+              data-testid="generator-pattern-color"
+              id="generator-pattern-color"
+              onChange={(event) => setPatternColor(event.target.value)}
+              value={patternColor}
+            />
+          </div>
+
+          <div>
+            <label className="label" htmlFor="generator-background-color">
+              Background color
+            </label>
+            <input
+              className="input"
+              data-testid="generator-background-color"
+              id="generator-background-color"
+              onChange={(event) => setBackgroundColor(event.target.value)}
+              value={backgroundColor}
+            />
+          </div>
+
+          <div>
+            <label className="label" htmlFor="generator-error-correction">
+              Error correction
+            </label>
+            <select
+              className="select"
+              data-testid="generator-error-correction"
+              id="generator-error-correction"
+              onChange={(event) =>
+                setErrorCorrection(event.target.value as "L" | "M" | "Q" | "H")
+              }
+              value={errorCorrection}
+            >
+              <option value="L">L</option>
+              <option value="M">M</option>
+              <option value="Q">Q</option>
+              <option value="H">H</option>
+            </select>
+          </div>
+        </div>
+
+        {createError ? <div className="callout danger">{createError}</div> : null}
+
+        <div className="table-actions">
+          <button
+            className="button"
+            data-testid="generator-submit"
+            disabled={isCreating}
+            onClick={handleCreate}
+            type="button"
+          >
+            {isCreating ? "Creating..." : "Create QR"}
+          </button>
+          <span className="muted">
+            Workspace: {authenticatedSession.user.defaultWorkspaceId}
+          </span>
+        </div>
+      </section>
+
+      <section className="card">
+        <span className="badge">Created result</span>
+        {createdQr ? (
+          <div className="stack-lg" data-testid="generator-created-result">
+            <div className="stack-sm">
+              <h2 className="h2">{createdQr.title ?? createdQr.slug}</h2>
+              <div className="muted mono">{createdQr.slug}</div>
+              <a
+                className="dashboard-link mono"
+                href={createdQr.shortUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {createdQr.shortUrl}
+              </a>
+            </div>
+
+            <div className="table-actions">
+              <button
+                className="button secondary compact"
+                data-testid="generator-download-png"
+                disabled={busyDownload === "png"}
+                onClick={() => handleDownload("png")}
+                type="button"
+              >
+                {busyDownload === "png" ? "Downloading..." : "Download PNG"}
+              </button>
+              <button
+                className="button secondary compact"
+                data-testid="generator-download-svg"
+                disabled={busyDownload === "svg"}
+                onClick={() => handleDownload("svg")}
+                type="button"
+              >
+                {busyDownload === "svg" ? "Downloading..." : "Download SVG"}
+              </button>
+              <Link
+                className="button secondary compact"
+                href={`/dashboard/qr/${createdQr.id}`}
+              >
+                Open details
+              </Link>
+            </div>
+
+            {downloadError ? <div className="callout danger">{downloadError}</div> : null}
+
+            <pre className="code-block">{JSON.stringify(createdQr.content, null, 2)}</pre>
+          </div>
+        ) : (
+          <div className="muted" data-testid="generator-empty-result">
+            No QR has been created in this session yet.
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}

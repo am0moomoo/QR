@@ -11,10 +11,11 @@ import {
   Res,
   UseGuards
 } from "@nestjs/common";
-import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiBody, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { AuthGuard } from "../auth/auth.guard";
+import { CreateQrCodeDto, UpdateQrCodeDto } from "./qr-codes.dto";
 import { QrCodesService } from "./qr-codes.service";
 
 @ApiTags("QR Codes")
@@ -33,6 +34,7 @@ export class QrCodesController {
   }
 
   @Post()
+  @ApiBody({ type: CreateQrCodeDto })
   create(@CurrentUser() user: { id: string }, @Body() body: unknown) {
     return this.qrCodesService.create(user.id, body);
   }
@@ -43,6 +45,7 @@ export class QrCodesController {
   }
 
   @Patch(":id")
+  @ApiBody({ type: UpdateQrCodeDto })
   update(
     @CurrentUser() user: { id: string },
     @Param("id") id: string,

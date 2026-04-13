@@ -96,58 +96,15 @@ test("dashboard list, details, analytics, and settings use live API data", async
     password: null
   };
 
-  const activeQr = await apiRequest<{
+  let activeQr!: {
     id: string;
     shortUrl: string;
     slug: string;
-  }>("/qr-codes", {
-    body: {
-      content: {
-        link: "https://example.com/dashboard-live"
-      },
-      design,
-      exports: ["png", "svg"],
-      settings,
-      title: activeTitle,
-      type: "link",
-      workspaceId: workspace.id
-    },
-    method: "POST",
-    token: registration.accessToken
-  });
-
-  const inactiveQr = await apiRequest<{
+  };
+  let inactiveQr!: {
     id: string;
     slug: string;
-  }>("/qr-codes", {
-    body: {
-      content: {
-        link: "https://example.com/dashboard-inactive"
-      },
-      design,
-      exports: ["png", "svg"],
-      settings,
-      title: inactiveTitle,
-      type: "link",
-      workspaceId: workspace.id
-    },
-    method: "POST",
-    token: registration.accessToken
-  });
-
-  await apiRequest(`/qr-codes/${inactiveQr.id}/deactivate`, {
-    method: "POST",
-    token: registration.accessToken
-  });
-
-  await fetch(`${apiUrl}/r/${activeQr.slug}`, {
-    headers: {
-      "Accept-Language": "en-US,en;q=0.9",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/123",
-      "X-Country": "US"
-    },
-    redirect: "manual"
-  });
+  };
 
   await test.step("sign in through the dashboard auth form", async () => {
     await page.goto(`${appUrl}/dashboard`);
@@ -156,7 +113,86 @@ test("dashboard list, details, analytics, and settings use live API data", async
     await page.locator("#dashboard-password").fill(password);
     await page.getByTestId("dashboard-auth-submit").click();
     await expect(page.getByTestId("qr-list-view")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "QR list" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No QR codes yet" })).toBeVisible();
+  });
+
+  await test.step("show a truthful empty state and create a real QR through the generator UI", async () => {
+    await expect(page.getByRole("heading", { name: "No QR codes yet" })).toBeVisible();
+    await page.getByRole("link", { name: "Create your first link QR" }).click();
+
+    await expect(page).toHaveURL(`${appUrl}/generator`);
+    await expect(page.getByTestId("generator-view")).toBeVisible();
+    await page.getByTestId("generator-title").fill(activeTitle);
+    await page.getByTestId("generator-link").fill("https://example.com/dashboard-live");
+    await page.getByTestId("generator-submit").click();
+
+    await expect(page.getByTestId("generator-created-result")).toBeVisible();
+    await expect(page.getByTestId("generator-created-result")).toContainText(activeTitle);
+    await expect(page.getByTestId("generator-download-png")).toBeVisible();
+    await expect(page.getByTestId("generator-download-svg")).toBeVisible();
+
+    activeQr = await apiRequest<{
+      items: Array<{
+        id: string;
+        shortUrl: string;
+        slug: string;
+        title: string | null;
+      }>;
+    }>("/qr-codes", {
+      token: registration.accessToken
+    }).then((response) => {
+      const createdItem = response.items.find(
+        (item) => item.title === activeTitle
+      );
+
+      if (!createdItem) {
+        throw new Error("Generator-created QR was not returned by the live list API.");
+      }
+
+      return createdItem;
+    });
+
+    await page.getByRole("link", { name: "Open dashboard" }).click();
+    await expect(page).toHaveURL(`${appUrl}/dashboard`);
+    await expect(page.getByTestId(`qr-row-${activeQr.id}`)).toBeVisible();
+  });
+
+  await test.step("create a second QR through the API for list filtering and analytics setup", async () => {
+    inactiveQr = await apiRequest<{
+      id: string;
+      slug: string;
+    }>("/qr-codes", {
+      body: {
+        content: {
+          link: "https://example.com/dashboard-inactive"
+        },
+        design,
+        exports: ["png", "svg"],
+        settings,
+        title: inactiveTitle,
+        type: "link",
+        workspaceId: workspace.id
+      },
+      method: "POST",
+      token: registration.accessToken
+    });
+
+    await apiRequest(`/qr-codes/${inactiveQr.id}/deactivate`, {
+      method: "POST",
+      token: registration.accessToken
+    });
+
+    await fetch(`${apiUrl}/r/${activeQr.slug}`, {
+      headers: {
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/123",
+        "X-Country": "US"
+      },
+      redirect: "manual"
+    });
+
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await expect(page.getByTestId(`qr-row-${inactiveQr.id}`)).toBeVisible();
   });
 
   await test.step("render the live QR list with search, filter, and sort", async () => {

@@ -73,45 +73,59 @@ export class RenderQueueService implements OnModuleDestroy {
       );
     }
 
-    const existingJob = await this.queue!.getJob(jobId);
+    try {
+      const existingJob = await this.queue!.getJob(jobId);
 
-    if (existingJob) {
-      const state = await existingJob.getState();
+      if (existingJob) {
+        const state = await existingJob.getState();
 
-      if (state === "completed") {
-        return this.pipeline.waitForFormats(qrCodeId, formats);
+        if (state === "completed") {
+          return this.pipeline.waitForFormats(qrCodeId, formats);
+        }
+
+        if (state === "active" || state === "waiting" || state === "delayed") {
+          await existingJob.waitUntilFinished(this.queueEvents!, 45_000);
+          return this.pipeline.waitForFormats(qrCodeId, formats);
+        }
+
+        if (state === "failed") {
+          await existingJob.remove();
+        }
       }
 
-      if (state === "active" || state === "waiting" || state === "delayed") {
-        await existingJob.waitUntilFinished(this.queueEvents!, 45_000);
-        return this.pipeline.waitForFormats(qrCodeId, formats);
-      }
-
-      if (state === "failed") {
-        await existingJob.remove();
-      }
-    }
-
-    const job = await this.queue!.add(
-      "render",
-      {
-        qrCodeId,
-        requestedFormats: formats
-      },
-      {
-        attempts: 3,
-        backoff: {
-          delay: 1_000,
-          type: "exponential"
+      const job = await this.queue!.add(
+        "render",
+        {
+          qrCodeId,
+          requestedFormats: formats
         },
-        jobId,
-        removeOnComplete: 100,
-        removeOnFail: 100
-      }
-    );
+        {
+          attempts: 3,
+          backoff: {
+            delay: 1_000,
+            type: "exponential"
+          },
+          jobId,
+          removeOnComplete: 100,
+          removeOnFail: 100
+        }
+      );
 
-    await job.waitUntilFinished(this.queueEvents!, 45_000);
-    return this.pipeline.waitForFormats(qrCodeId, formats);
+      await job.waitUntilFinished(this.queueEvents!, 45_000);
+      return this.pipeline.waitForFormats(qrCodeId, formats);
+    } catch (error) {
+      await this.tryRemoveQueuedJob(jobId);
+      this.logger.warn(
+        "render.queue_wait_failed_falling_back_inline",
+        {
+          jobId,
+          qrCodeId,
+          reason: error instanceof Error ? error.message : String(error)
+        },
+        RenderQueueService.name
+      );
+      return this.runInline(qrCodeId, formats, jobId);
+    }
   }
 
   private async runInline(
@@ -288,5 +302,27 @@ export class RenderQueueService implements OnModuleDestroy {
     const key = this.redis.buildKey("render-lock", lockId);
     await this.redis.del(key);
     this.inlineLocks.delete(lockId);
+  }
+
+  private async tryRemoveQueuedJob(jobId: string) {
+    if (!this.queue) {
+      return;
+    }
+
+    try {
+      const job = await this.queue.getJob(jobId);
+
+      if (!job) {
+        return;
+      }
+
+      const state = await job.getState();
+
+      if (state !== "active") {
+        await job.remove();
+      }
+    } catch {
+      // Best effort cleanup before inline fallback.
+    }
   }
 }

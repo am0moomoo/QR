@@ -481,9 +481,12 @@ components:
         avatarUrl:
           type: [string, "null"]
           format: uri
+        defaultWorkspaceId:
+          type: [string, "null"]
+          format: uuid
         locale:
           type: string
-      required: [id, email, fullName, avatarUrl, locale]
+      required: [id, email, fullName, avatarUrl, defaultWorkspaceId, locale]
 
     RegisterRequest:
       type: object
@@ -640,9 +643,14 @@ components:
           type: [string, "null"]
         type:
           type: string
+          enum: [link]
         content:
           type: object
-          additionalProperties: true
+          properties:
+            link:
+              type: string
+              format: uri
+          required: [link]
         design:
           $ref: "#/components/schemas/QRCodeDesign"
         settings:
@@ -652,6 +660,23 @@ components:
           items:
             $ref: "#/components/schemas/ExportFormat"
       required: [workspaceId, type, content]
+      example:
+        workspaceId: "2f54368a-3d72-4aa1-bbe9-a9542e3ece3d"
+        title: "Launch QR"
+        type: "link"
+        content:
+          link: "https://example.com/launch"
+        design:
+          backgroundColor: "#ffffff"
+          patternColor: "#111111"
+          errorCorrection: "M"
+          sizePx: 512
+          quietZoneModules: 4
+        settings:
+          adsEnabled: true
+          doNotIndex: false
+          isOneTime: false
+        exports: [png, svg]
 
     UpdateQRCodeRequest:
       type: object
@@ -663,11 +688,20 @@ components:
           format: uuid
         content:
           type: object
-          additionalProperties: true
+          properties:
+            link:
+              type: string
+              format: uri
         design:
           $ref: "#/components/schemas/QRCodeDesign"
         settings:
           $ref: "#/components/schemas/QRCodeSettings"
+      example:
+        title: "Updated launch QR"
+        content:
+          link: "https://example.com/updated-launch"
+        settings:
+          doNotIndex: true
 
     QRCode:
       type: object

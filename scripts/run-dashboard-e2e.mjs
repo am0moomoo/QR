@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import net from "node:net";
 import process from "node:process";
 
 const rootCwd = process.cwd();
@@ -8,19 +9,57 @@ const appUrl = process.env.APP_URL ?? "http://127.0.0.1:3000";
 const apiHealthUrl = `${apiUrl.replace(/\/$/, "")}/api/v1/health`;
 const dashboardUrl = `${appUrl.replace(/\/$/, "")}/dashboard`;
 const children = [];
+let isCleaningUp = false;
+
+function getPort(url) {
+  return Number(new URL(url).port || (url.startsWith("https:") ? "443" : "80"));
+}
+
+async function assertPortAvailable(port, host = "127.0.0.1") {
+  await new Promise((resolve, reject) => {
+    const server = net.createServer();
+
+    server.once("error", (error) => {
+      reject(error);
+    });
+    server.once("listening", () => {
+      server.close((closeError) => {
+        if (closeError) {
+          reject(closeError);
+          return;
+        }
+
+        resolve(undefined);
+      });
+    });
+    server.listen(port, host);
+  }).catch((error) => {
+    throw new Error(
+      `Port ${port} is already in use on ${host}. Stop the existing process before running dashboard e2e. Cause: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  });
+}
 
 function runProcess(name, args, extraEnv = {}) {
-  const child = spawn(pnpmCommand, args, {
+  const child = spawn(
+    process.platform === "win32" ? "cmd.exe" : pnpmCommand,
+    process.platform === "win32"
+      ? ["/d", "/s", "/c", pnpmCommand, ...args]
+      : args,
+    {
     cwd: rootCwd,
     env: {
       ...process.env,
       ...extraEnv
     },
     stdio: "inherit"
-  });
+    }
+  );
 
   child.on("exit", (code, signal) => {
-    if (code === 0 || signal === "SIGTERM") {
+    if (isCleaningUp || code === 0 || signal === "SIGTERM") {
       return;
     }
 
@@ -70,10 +109,14 @@ async function terminateChild(child) {
 }
 
 async function cleanup() {
+  isCleaningUp = true;
   await Promise.all(children.map((child) => terminateChild(child)));
 }
 
 async function main() {
+  await assertPortAvailable(getPort(apiUrl));
+  await assertPortAvailable(getPort(appUrl));
+
   console.log(`[dashboard-e2e] starting api server on ${apiUrl}`);
   const apiProcess = runProcess("api", ["--filter", "@qr/api", "start"], {
     API_PORT: process.env.API_PORT ?? "4000"
@@ -89,14 +132,26 @@ async function main() {
 
     const testExitCode = await new Promise((resolve) => {
       const playwright = spawn(
-        pnpmCommand,
-        [
-          "exec",
-          "playwright",
-          "test",
-          "--workers=1",
-          "apps/web/e2e/dashboard.spec.ts"
-        ],
+        process.platform === "win32" ? "cmd.exe" : pnpmCommand,
+        process.platform === "win32"
+          ? [
+              "/d",
+              "/s",
+              "/c",
+              pnpmCommand,
+              "exec",
+              "playwright",
+              "test",
+              "--workers=1",
+              "apps/web/e2e/dashboard.spec.ts"
+            ]
+          : [
+              "exec",
+              "playwright",
+              "test",
+              "--workers=1",
+              "apps/web/e2e/dashboard.spec.ts"
+            ],
         {
           cwd: rootCwd,
           env: process.env,

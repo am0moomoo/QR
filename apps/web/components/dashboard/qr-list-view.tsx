@@ -87,29 +87,40 @@ export function QrListView({
 
   if (qrCodesState.status === "loading" && !qrCodesState.data) {
     return (
-      <LoadingState
-        body="The dashboard is pulling QR codes from the live API."
-        title="Loading your QR codes"
-      />
+      <main data-testid="qr-list-view">
+        <LoadingState
+          body="The dashboard is pulling QR codes from the live API."
+          title="Loading your QR codes"
+        />
+      </main>
     );
   }
 
   if (qrCodesState.status === "error") {
     return (
-      <ErrorState
-        body={qrCodesState.errorMessage ?? "QR list request failed."}
-        onRetry={() => setReloadNonce((value) => value + 1)}
-        title="Could not load QR codes"
-      />
+      <main data-testid="qr-list-view">
+        <ErrorState
+          body={qrCodesState.errorMessage ?? "QR list request failed."}
+          onRetry={() => setReloadNonce((value) => value + 1)}
+          title="Could not load QR codes"
+        />
+      </main>
     );
   }
 
-  if (items.length === 0) {
+  if ((qrCodesState.data?.total ?? 0) === 0) {
     return (
-      <EmptyState
-        body="No QR codes exist for this account yet. The list is reading live API data, so an empty state here means the backend returned zero items."
-        title="No QR codes yet"
-      />
+      <main data-testid="qr-list-view">
+        <EmptyState
+          action={
+            <Link className="button" href={"/generator" as Route}>
+              Create your first link QR
+            </Link>
+          }
+          body="No QR codes exist for this account yet. The list is reading live API data, so an empty state here means the backend returned zero items."
+          title="No QR codes yet"
+        />
+      </main>
     );
   }
 
@@ -125,13 +136,18 @@ export function QrListView({
               filters call the real list endpoint.
             </p>
           </div>
-          <button
-            className="button secondary"
-            onClick={() => setReloadNonce((value) => value + 1)}
-            type="button"
-          >
-            Refresh
-          </button>
+          <div className="table-actions">
+            <Link className="button" href={"/generator" as Route}>
+              Create link QR
+            </Link>
+            <button
+              className="button secondary"
+              onClick={() => setReloadNonce((value) => value + 1)}
+              type="button"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
 
         <div className="form-grid">

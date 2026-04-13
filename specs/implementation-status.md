@@ -60,6 +60,7 @@ Update this file after each major Codex pass.
 
 ## Dashboard UI
 - [x] bearer-auth dashboard shell
+- [x] generator create flow
 - [x] QR list page
 - [x] QR details page
 - [x] analytics page
@@ -76,7 +77,7 @@ Update this file after each major Codex pass.
 
 ## API and integrations
 - [ ] API keys
-- [ ] API v1 create/update/get
+- [~] API v1 create/update/get
 - [ ] webhook endpoints
 - [ ] safety checks
 - [ ] custom domains
@@ -133,7 +134,7 @@ Update this file after each major Codex pass.
   - billing, quotas, and Stripe flows remain intentionally untouched until staging truth exists
 
 ## UI shipped vs backend-capable
-- shipped in UI: QR list, QR details, analytics, profile/settings
+- shipped in UI: generator create flow, QR list, QR details, analytics, profile/settings
 - backend-capable only: Google OAuth, billing, API keys, webhooks, custom domains, folders/workspaces
 - intentionally not started in UI: billing polish, bulk import, folders/workspaces, custom domains, visual polish
 
@@ -159,7 +160,7 @@ Update this file after each major Codex pass.
 - 2026-04-13: exact end-to-end smoke flow verified green in GitHub Actions on `37ee22106e7e41f8c8ae26ab4ad656d591acf133`: `register -> login -> create QR -> render PNG/SVG -> download -> scan slug -> persist raw scan event -> update daily aggregate -> forgot/reset password -> update profile`
 - 2026-04-13: verified blocker in this session: Docker is not installed, and `localhost:5432` / `localhost:6379` are closed, so `docker compose up`, `prisma migrate deploy`, Redis verification, seed execution, and true end-to-end integration runs remain blocked on local infrastructure
 - 2026-04-13: dashboard UI now ships real bearer-authenticated pages for QR list, QR details, analytics, and profile/settings on top of `/me`, `/qr-codes`, `/qr-codes/{id}`, `/qr-codes/{id}/downloads`, and `/qr-codes/{id}/analytics`
-- 2026-04-13: dashboard UI deliberately does not expose folders/workspaces, billing polish, custom domains, bulk import, or generator/create flows yet; those remain backend-capable or backlog-only
+- 2026-04-13: dashboard UI now exposes a real link-QR generator flow on top of the live backend; folders/workspaces, billing polish, custom domains, bulk import, and visual polish remain intentionally out of scope
 - 2026-04-13: local verification for the dashboard pass completed with `pnpm build`, `pnpm typecheck`, `pnpm lint`, `@qr/api test:unit`, `@qr/api test:integration` skip-mode, `node --check scripts/run-dashboard-e2e.mjs`, and `pnpm exec playwright test apps/web/e2e/dashboard.spec.ts --list`
 - 2026-04-13: dashboard e2e smoke is now wired into CI to cover list -> details -> analytics -> profile/settings against live web+api servers
 - 2026-04-13: observed GitHub Actions run `ci #5` (`24323889571`) succeed on commit `9b0d5c2ac771ad4e006234447a1743361be95e4f`; passed job: `verify`
@@ -187,3 +188,7 @@ Update this file after each major Codex pass.
 - 2026-04-13: observed GitHub Actions run `ci #23` (`24333928557`) fail on commit `5786ab6a625a14dcbad7e497b8aaab9f6fd1a4e2` before jobs were created because optional verifier gating was wired in an invalid workflow shape
 - 2026-04-13: observed GitHub Actions run `ci #24` (`24334027215`) succeed on commit `ea02b7e3ae833f48bdc355edd1a9fe47f8f96c8e`; passed jobs: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`; observed skipped jobs: `verify-real-bucket`, `verify-staging-smoke`
 - 2026-04-13: local verification for the staging-prep pass completed with `pnpm.cmd build`, `pnpm.cmd lint`, `pnpm.cmd typecheck`, `pnpm.cmd --filter @qr/api test:unit`, `pnpm.cmd --filter @qr/api test:integration` skip-mode without live DB/Redis, and `pnpm.cmd --filter @qr/api test:integration:real-bucket` skip-mode without live bucket credentials
+- 2026-04-13: observed locally in this session that compiled API runtime `POST /api/v1/qr-codes` now returns `201 Created` for a valid `link` payload, persists the QR, generates PNG/SVG assets, and returns working download metadata in both source-test and built-server execution paths
+- 2026-04-13: root cause for the broken create flow was reproduced and fixed: Nest `ValidationPipe` was stripping DTO-typed QR request bodies because the controller used Swagger DTO classes without `class-validator` rules; create/update endpoints now keep runtime bodies as `unknown` for Zod validation while still exposing DTO-backed editable Swagger request bodies
+- 2026-04-13: observed locally in this session with `pnpm.cmd test:dashboard:e2e` that the browser flow now works end to end on live web+api servers: `register -> login -> truthful empty dashboard state -> generator create link QR -> dashboard list row appears -> search/filter/sort -> QR details -> analytics -> profile/settings`
+- 2026-04-13: `scripts/run-dashboard-e2e.mjs` now truthfully refuses occupied test ports and supports Windows process spawning, so local dashboard smoke no longer piggybacks on stale listeners or fails before browser startup

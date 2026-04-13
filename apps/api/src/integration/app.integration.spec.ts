@@ -146,7 +146,7 @@ function textParser(
   });
 }
 
-test("integration smoke: register -> login -> QR render/download -> scan -> analytics -> forgot/reset -> profile", async (t) => {
+test("integration smoke: register -> login -> create link QR -> list -> get -> download -> scan -> analytics -> forgot/reset -> profile", async (t) => {
   if (!(await ensureIntegrationReady(t))) {
     return;
   }
@@ -250,6 +250,27 @@ test("integration smoke: register -> login -> QR render/download -> scan -> anal
     .expect(201);
 
   assert.equal(createQr.body.downloads.length, 2);
+
+  const listResponse = await request(server)
+    .get("/api/v1/qr-codes")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(200);
+
+  assert.equal(listResponse.body.total, 1);
+  assert.equal(listResponse.body.items.length, 1);
+  assert.equal(listResponse.body.items[0].id, createQr.body.id);
+  assert.equal(listResponse.body.items[0].type, "link");
+
+  await request(server)
+    .get(`/api/v1/qr-codes/${createQr.body.id}`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(200)
+    .expect(({ body }: { body: Record<string, any> }) => {
+      assert.equal(body.id, createQr.body.id);
+      assert.equal(body.type, "link");
+      assert.equal(body.content.link, "https://example.com/launch");
+      assert.equal(body.downloads.length, 2);
+    });
 
   await request(server)
     .post(`/api/v1/qr-codes/${createQr.body.id}/render`)

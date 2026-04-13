@@ -4,25 +4,18 @@ import {
   OnModuleInit
 } from "@nestjs/common";
 import Redis from "ioredis";
-import { StructuredLoggerService } from "./structured-logger.service";
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private client: Redis | null = null;
 
-  constructor(private readonly logger: StructuredLoggerService) {}
-
   async onModuleInit() {
     const redisUrl = process.env.REDIS_URL;
 
     if (!redisUrl) {
-      this.logger.warn(
-        "redis.config_missing",
-        {
-          fallback: "in-process"
-        },
-        RedisService.name
-      );
+      console.warn("redis.config_missing", {
+        fallback: "in-process"
+      });
       return;
     }
 
@@ -35,22 +28,16 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       await client.connect();
       this.client = client;
-      this.logger.info(
-        "redis.connected",
-        {
-          url: redisUrl
-        },
-        RedisService.name
-      );
+
+      console.log("redis.connected", {
+        url: redisUrl
+      });
     } catch (error) {
-      this.logger.warn(
-        "redis.connection_failed",
-        {
-          fallback: "in-process",
-          message: error instanceof Error ? error.message : String(error)
-        },
-        RedisService.name
-      );
+      console.warn("redis.connection_failed", {
+        fallback: "in-process",
+        message: error instanceof Error ? error.message : String(error)
+      });
+
       client.disconnect(false);
     }
   }

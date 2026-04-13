@@ -35,7 +35,11 @@ export class AuthGuard implements CanActivate {
       id: session.id,
       expiresAt: session.expiresAt.toISOString()
     };
-    request.currentUser = this.authService.serializeUser(session.user);
+    request.currentUser = this.authService.serializeUser(session.user, {
+      defaultWorkspaceId: await this.authService.getDefaultWorkspaceIdForUser(
+        session.user.id
+      )
+    });
 
     return true;
   }

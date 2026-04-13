@@ -118,6 +118,14 @@ test("AuthService.register creates a default workspace and returns a bearer toke
         revokedAt: null
       })
     },
+    workspace: {
+      findFirst: async () => ({
+        id: "workspace-1"
+      })
+    },
+    workspaceMember: {
+      findFirst: async () => null
+    },
     user: {
       findUnique: async () => null
     },
@@ -169,6 +177,7 @@ test("AuthService.register creates a default workspace and returns a bearer toke
   assert.equal(result.user.email, "test.user@example.com");
   assert.equal(result.user.fullName, "Test User");
   assert.equal(result.user.avatarUrl, null);
+  assert.equal(result.user.defaultWorkspaceId, "workspace-1");
   assert.equal(createdWorkspaceSlug, "test-user");
   assert.ok(result.accessToken.length > 20);
 });
@@ -396,7 +405,8 @@ test("QrCodesService.create renders real download assets and returns stable shor
     storage as any,
     assetPipeline as any,
     renderQueue as any,
-    analytics as any
+    analytics as any,
+    logger as any
   );
   const result = await service.create("user-1", {
     content: { link: "https://example.com/spring" },

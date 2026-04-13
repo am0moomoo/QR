@@ -59,12 +59,13 @@ Update this file after each major Codex pass.
 - [ ] retention jobs
 
 ## Dashboard UI
-- [x] bearer-auth dashboard shell
+- [x] sign-in/session UX
 - [x] generator create flow
 - [x] QR list page
 - [x] QR details page
 - [x] analytics page
 - [x] profile/settings page
+- [x] QR management actions
 - [x] dashboard e2e smoke
 
 ## Billing
@@ -138,7 +139,7 @@ Update this file after each major Codex pass.
   - billing, quotas, and Stripe flows remain intentionally untouched until staging truth exists
 
 ## UI shipped vs backend-capable
-- shipped in UI: generator create flow, QR list, QR details, analytics, profile/settings
+- shipped in UI: sign in, session restore across refresh, logout, generator create flow, QR list, QR details, analytics, profile/settings, QR management actions (`download`, `duplicate`, `archive`, `delete`)
 - backend-capable only: Google OAuth, billing, API keys, webhooks, custom domains, folders/workspaces
 - intentionally not started in UI: billing polish, bulk import, folders/workspaces, custom domains, visual polish
 
@@ -195,4 +196,5 @@ Update this file after each major Codex pass.
 - 2026-04-13: observed locally in this session that compiled API runtime `POST /api/v1/qr-codes` now returns `201 Created` for a valid `link` payload, persists the QR, generates PNG/SVG assets, and returns working download metadata in both source-test and built-server execution paths
 - 2026-04-13: root cause for the broken create flow was reproduced and fixed: Nest `ValidationPipe` was stripping DTO-typed QR request bodies because the controller used Swagger DTO classes without `class-validator` rules; create/update endpoints now keep runtime bodies as `unknown` for Zod validation while still exposing DTO-backed editable Swagger request bodies
 - 2026-04-13: observed locally in this session with `pnpm.cmd test:dashboard:e2e` that the browser flow now works end to end on live web+api servers: `register -> login -> truthful empty dashboard state -> generator create link QR -> dashboard list row appears -> search/filter/sort -> QR details -> analytics -> profile/settings`
+- 2026-04-13: observed locally in this session with `pnpm.cmd build`, `pnpm.cmd lint`, `pnpm.cmd typecheck`, `pnpm.cmd test`, and `pnpm.cmd test:dashboard:e2e` that the usable-product UI flow now works on live web+api servers: `sign in -> empty QR list -> create link QR from generator -> QR appears in dashboard list -> refresh restores session -> QR details -> PNG download -> analytics -> profile update -> duplicate -> archive -> delete -> logout -> protected route returns to auth form`
 - 2026-04-13: `scripts/run-dashboard-e2e.mjs` now truthfully refuses occupied test ports and supports Windows process spawning, so local dashboard smoke no longer piggybacks on stale listeners or fails before browser startup

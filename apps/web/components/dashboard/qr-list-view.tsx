@@ -5,7 +5,11 @@ import Link from "next/link";
 import { qrStatuses, qrTypes } from "@qr/types";
 import { useDeferredValue, useEffect, useState } from "react";
 import {
+  deleteDashboardQrCode,
+  downloadDashboardQrAsset,
+  duplicateDashboardQrCode,
   listDashboardQrCodes,
+  postDashboardQrAction,
   type DashboardQrListResponse
 } from "../../lib/dashboard-api";
 import { EmptyState, ErrorState, LoadingState } from "./dashboard-state";
@@ -19,6 +23,7 @@ import {
   getStatusTone,
   matchesSearch,
   sortQrCodes,
+  startFileDownload,
   toErrorMessage
 } from "./dashboard-utils";
 
@@ -32,12 +37,20 @@ export function QrListView({
   const [sortValue, setSortValue] = useState<QrSortValue>("updated-desc");
   const [searchValue, setSearchValue] = useState("");
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
   const [qrCodesState, setQrCodesState] =
     useState<RemoteState<DashboardQrListResponse>>(createInitialRemoteState);
   const deferredSearch = useDeferredValue(searchValue);
 
+  function buildActionKey(qrId: string, action: string) {
+    return `${qrId}:${action}`;
+  }
+
   useEffect(() => {
     let isActive = true;
+    setActionError(null);
 
     setQrCodesState((currentState) => ({
       data: currentState.data,
@@ -85,11 +98,89 @@ export function QrListView({
     sortValue
   );
 
+  async function handleDownload(qrId: string, format: "png" | "svg" = "png") {
+    const actionKey = buildActionKey(qrId, `download-${format}`);
+    setBusyActionKey(actionKey);
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      const file = await downloadDashboardQrAsset(token, qrId, format);
+      startFileDownload(file);
+    } catch (error) {
+      setActionError(toErrorMessage(error));
+    } finally {
+      setBusyActionKey(null);
+    }
+  }
+
+  async function handleDuplicate(qrId: string) {
+    const actionKey = buildActionKey(qrId, "duplicate");
+    setBusyActionKey(actionKey);
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      await duplicateDashboardQrCode(token, qrId);
+      setActionMessage("A copy of the QR code is ready in your list.");
+      setReloadNonce((value) => value + 1);
+    } catch (error) {
+      setActionError(toErrorMessage(error));
+    } finally {
+      setBusyActionKey(null);
+    }
+  }
+
+  async function handleStatusAction(
+    qrId: string,
+    action: "activate" | "archive"
+  ) {
+    const actionKey = buildActionKey(qrId, action);
+    setBusyActionKey(actionKey);
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      await postDashboardQrAction(token, qrId, action);
+      setActionMessage(
+        action === "archive"
+          ? "The QR code was archived."
+          : "The QR code is active again."
+      );
+      setReloadNonce((value) => value + 1);
+    } catch (error) {
+      setActionError(toErrorMessage(error));
+    } finally {
+      setBusyActionKey(null);
+    }
+  }
+
+  async function handleDelete(qrId: string) {
+    if (!window.confirm("Delete this QR code? Downloads and scan history links will no longer be available from the dashboard.")) {
+      return;
+    }
+
+    const actionKey = buildActionKey(qrId, "delete");
+    setBusyActionKey(actionKey);
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      await deleteDashboardQrCode(token, qrId);
+      setActionMessage("The QR code was deleted.");
+      setReloadNonce((value) => value + 1);
+    } catch (error) {
+      setActionError(toErrorMessage(error));
+    } finally {
+      setBusyActionKey(null);
+    }
+  }
+
   if (qrCodesState.status === "loading" && !qrCodesState.data) {
     return (
       <main data-testid="qr-list-view">
         <LoadingState
-          body="The dashboard is pulling QR codes from the live API."
+          body="Loading your QR codes and the latest scan counts."
           title="Loading your QR codes"
         />
       </main>
@@ -100,7 +191,7 @@ export function QrListView({
     return (
       <main data-testid="qr-list-view">
         <ErrorState
-          body={qrCodesState.errorMessage ?? "QR list request failed."}
+          body={qrCodesState.errorMessage ?? "We couldn't load your QR codes right now."}
           onRetry={() => setReloadNonce((value) => value + 1)}
           title="Could not load QR codes"
         />
@@ -117,7 +208,7 @@ export function QrListView({
               Create your first link QR
             </Link>
           }
-          body="No QR codes exist for this account yet. The list is reading live API data, so an empty state here means the backend returned zero items."
+          body="You haven't created any QR codes yet. Start with a link QR and it will appear here right away."
           title="No QR codes yet"
         />
       </main>
@@ -129,11 +220,10 @@ export function QrListView({
       <section className="card">
         <div className="toolbar">
           <div>
-            <span className="badge">Real API data</span>
-            <h1 className="h2">QR list</h1>
+            <span className="badge">QR codes</span>
+            <h1 className="h2">Manage your QR codes</h1>
             <p className="muted">
-              Search runs locally on the live response set. Status and type
-              filters call the real list endpoint.
+              Search by title, filter by status, and take action on codes you already created.
             </p>
           </div>
           <div className="table-actions">
@@ -149,6 +239,9 @@ export function QrListView({
             </button>
           </div>
         </div>
+
+        {actionMessage ? <div className="callout success">{actionMessage}</div> : null}
+        {actionError ? <div className="callout danger">{actionError}</div> : null}
 
         <div className="form-grid">
           <div>
@@ -283,6 +376,64 @@ export function QrListView({
                         >
                           Analytics
                         </Link>
+                        <button
+                          className="button secondary compact"
+                          data-testid={`qr-download-link-${qrCode.id}`}
+                          disabled={busyActionKey === buildActionKey(qrCode.id, "download-png")}
+                          onClick={() => handleDownload(qrCode.id, "png")}
+                          type="button"
+                        >
+                          {busyActionKey === buildActionKey(qrCode.id, "download-png")
+                            ? "Downloading..."
+                            : "Download PNG"}
+                        </button>
+                        <button
+                          className="button secondary compact"
+                          data-testid={`qr-duplicate-${qrCode.id}`}
+                          disabled={busyActionKey === buildActionKey(qrCode.id, "duplicate")}
+                          onClick={() => handleDuplicate(qrCode.id)}
+                          type="button"
+                        >
+                          {busyActionKey === buildActionKey(qrCode.id, "duplicate")
+                            ? "Duplicating..."
+                            : "Duplicate"}
+                        </button>
+                        {qrCode.status === "ACTIVE" ? (
+                          <button
+                            className="button secondary compact"
+                            data-testid={`qr-archive-${qrCode.id}`}
+                            disabled={busyActionKey === buildActionKey(qrCode.id, "archive")}
+                            onClick={() => handleStatusAction(qrCode.id, "archive")}
+                            type="button"
+                          >
+                            {busyActionKey === buildActionKey(qrCode.id, "archive")
+                              ? "Archiving..."
+                              : "Archive"}
+                          </button>
+                        ) : (
+                          <button
+                            className="button secondary compact"
+                            data-testid={`qr-activate-${qrCode.id}`}
+                            disabled={busyActionKey === buildActionKey(qrCode.id, "activate")}
+                            onClick={() => handleStatusAction(qrCode.id, "activate")}
+                            type="button"
+                          >
+                            {busyActionKey === buildActionKey(qrCode.id, "activate")
+                              ? "Saving..."
+                              : "Activate"}
+                          </button>
+                        )}
+                        <button
+                          className="button secondary compact"
+                          data-testid={`qr-delete-${qrCode.id}`}
+                          disabled={busyActionKey === buildActionKey(qrCode.id, "delete")}
+                          onClick={() => handleDelete(qrCode.id)}
+                          type="button"
+                        >
+                          {busyActionKey === buildActionKey(qrCode.id, "delete")
+                            ? "Deleting..."
+                            : "Delete"}
+                        </button>
                       </div>
                     </td>
                   </tr>

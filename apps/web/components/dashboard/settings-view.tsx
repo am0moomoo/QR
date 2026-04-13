@@ -43,7 +43,7 @@ export function SettingsView({
           user: updatedUser
         });
         onUserUpdated(updatedUser);
-        setMessage("Profile settings saved from the live API.");
+        setMessage("Profile updated.");
       } catch (error) {
         setErrorMessage(toErrorMessage(error));
       }
@@ -53,11 +53,10 @@ export function SettingsView({
   return (
     <main className="stack-xl" data-testid="settings-view">
       <section className="card">
-        <span className="badge">Live /me endpoint</span>
+        <span className="badge">Account</span>
         <h1 className="h2">Profile & settings</h1>
         <p className="muted">
-          These fields load from <code>GET /me</code> and save back to{" "}
-          <code>PATCH /me</code>.
+          Keep your name, avatar, and locale up to date for your dashboard account.
         </p>
       </section>
 

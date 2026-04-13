@@ -97,7 +97,7 @@ export type DashboardAnalyticsResponse = {
 type DashboardRequestOptions = {
   body?: unknown;
   headers?: HeadersInit;
-  method?: "GET" | "PATCH" | "POST";
+  method?: "DELETE" | "GET" | "PATCH" | "POST";
   token?: string;
 };
 
@@ -348,6 +348,20 @@ export async function postDashboardQrAction(
     DashboardQrCode | { accepted: boolean; downloads: DashboardDownload[] }
   >(`/qr-codes/${qrId}/${action}`, {
     method: "POST",
+    token
+  });
+}
+
+export async function duplicateDashboardQrCode(token: string, qrId: string) {
+  return dashboardRequest<DashboardCreatedQrCode>(`/qr-codes/${qrId}/duplicate`, {
+    method: "POST",
+    token
+  });
+}
+
+export async function deleteDashboardQrCode(token: string, qrId: string) {
+  return dashboardRequest<{ success: boolean }>(`/qr-codes/${qrId}`, {
+    method: "DELETE",
     token
   });
 }

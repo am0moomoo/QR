@@ -58,7 +58,7 @@ function EventsTable({
   events: DashboardAnalyticsEvent[];
 }) {
   if (events.length === 0) {
-    return <div className="callout">No raw scan events in the selected range.</div>;
+    return <div className="callout">No scans were recorded in this date range.</div>;
   }
 
   return (
@@ -195,7 +195,7 @@ export function AnalyticsView({
   if (qrCodesState.status === "loading" && !qrCodesState.data) {
     return (
       <LoadingState
-        body="The analytics page is loading your QR inventory so it can query real aggregate data."
+        body="Loading your QR codes so analytics can be shown for a real item."
         title="Loading analytics"
       />
     );
@@ -216,7 +216,7 @@ export function AnalyticsView({
   if (qrCodes.length === 0) {
     return (
       <EmptyState
-        body="Analytics is empty because there are no QR codes in this account yet."
+        body="Create your first QR code and scan it to start seeing analytics here."
         title="No QR codes to analyze"
       />
     );
@@ -242,11 +242,10 @@ export function AnalyticsView({
       <section className="card">
         <div className="toolbar">
           <div>
-            <span className="badge">Real aggregate API</span>
+            <span className="badge">Analytics</span>
             <h1 className="h2">Analytics</h1>
             <p className="muted">
-              Daily bars, recent events, and breakdown cards are drawn from the
-              live <code>/qr-codes/:id/analytics</code> endpoint.
+              Review scan volume, recent events, and the most common countries and devices.
             </p>
           </div>
           <button
@@ -341,7 +340,7 @@ export function AnalyticsView({
 
       {analyticsState.status === "loading" && !analytics ? (
         <LoadingState
-          body="Pulling aggregates for the selected QR code."
+          body="Loading scan totals and recent activity for the selected QR code."
           title="Loading chart data"
         />
       ) : null}
@@ -361,7 +360,7 @@ export function AnalyticsView({
               <h2 className="h2">Daily scan volume</h2>
               {analytics.daily.length === 0 ? (
                 <div className="callout">
-                  No daily aggregate rows were returned for this time window.
+                  No scans were recorded for this QR code during the selected dates.
                 </div>
               ) : (
                 <AnalyticsChart points={analytics.daily} />
@@ -372,7 +371,7 @@ export function AnalyticsView({
               <div>
                 <h2 className="h2">Top countries</h2>
                 {countryTotals.length === 0 ? (
-                  <div className="callout">No country data yet.</div>
+                  <div className="callout">Country information will appear after scans are recorded.</div>
                 ) : (
                   <div className="stack-sm">
                     {countryTotals.slice(0, 5).map(([country, count]) => (
@@ -388,7 +387,7 @@ export function AnalyticsView({
               <div>
                 <h2 className="h2">Top devices</h2>
                 {deviceTotals.length === 0 ? (
-                  <div className="callout">No device data yet.</div>
+                  <div className="callout">Device information will appear after scans are recorded.</div>
                 ) : (
                   <div className="stack-sm">
                     {deviceTotals.slice(0, 5).map(([device, count]) => (

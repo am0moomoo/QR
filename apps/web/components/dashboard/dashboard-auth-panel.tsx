@@ -51,11 +51,10 @@ export function DashboardAuthPanel({
   return (
     <main className="dashboard-auth">
       <section className="card auth-card">
-        <span className="badge">Authenticated dashboard</span>
-        <h1 className="h2">Sign in to your QR workspace</h1>
+        <span className="badge">QRFlow</span>
+        <h1 className="h2">Sign in to your dashboard</h1>
         <p className="muted">
-          This dashboard calls the live QR API with bearer auth. No mocks, no
-          placeholder datasets.
+          Access your QR codes, downloads, scan analytics, and profile settings.
         </p>
 
         <div className="dashboard-toggle">
@@ -71,7 +70,7 @@ export function DashboardAuthPanel({
             onClick={() => setMode("register")}
             type="button"
           >
-            Register
+            Create account
           </button>
         </div>
 

@@ -26,7 +26,7 @@ export function DashboardShell({
   if (sessionState.status === "booting") {
     return (
       <LoadingState
-        body="Checking for an existing dashboard session."
+        body="Restoring your saved session."
         title="Loading dashboard"
       />
     );
@@ -47,7 +47,7 @@ export function DashboardShell({
   if (!authenticatedSession) {
     return (
       <LoadingState
-        body="Finalizing your authenticated dashboard session."
+        body="Preparing your workspace."
         title="Loading dashboard"
       />
     );
@@ -58,11 +58,10 @@ export function DashboardShell({
       <aside className="card dashboard-sidebar">
         <div className="stack-lg">
           <div>
-            <span className="badge">Dashboard</span>
-            <h1 className="h2">Real data only</h1>
+            <span className="badge">QRFlow</span>
+            <h1 className="h2">Your QR workspace</h1>
             <p className="muted">
-              Every section below reads the existing API instead of local mock
-              fixtures.
+              Create codes, manage downloads, and review scan activity from one place.
             </p>
           </div>
 
@@ -76,6 +75,7 @@ export function DashboardShell({
             <div className="muted break-word">{authenticatedSession.user.email}</div>
             <button
               className="button secondary compact"
+              data-testid="dashboard-logout"
               disabled={isLoggingOut}
               onClick={handleLogout}
               type="button"

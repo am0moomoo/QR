@@ -11,7 +11,13 @@ import {
 import { DashboardAuthPanel } from "../dashboard/dashboard-auth-panel";
 import { ErrorState, LoadingState } from "../dashboard/dashboard-state";
 import { useDashboardSession } from "../dashboard/use-dashboard-session";
-import { normalizeFieldValue, toErrorMessage } from "../dashboard/dashboard-utils";
+import {
+  getQrLinkTarget,
+  getStatusLabel,
+  normalizeFieldValue,
+  startFileDownload,
+  toErrorMessage
+} from "../dashboard/dashboard-utils";
 
 const defaultDesign = {
   backgroundColor: "#ffffff",
@@ -56,7 +62,7 @@ export function LinkGenerator() {
   if (sessionState.status === "booting") {
     return (
       <LoadingState
-        body="Checking whether a dashboard session already exists for the generator."
+        body="Restoring your session so you can create a QR code."
         title="Loading generator"
       />
     );
@@ -77,7 +83,7 @@ export function LinkGenerator() {
   if (!authenticatedSession?.user.defaultWorkspaceId) {
     return (
       <ErrorState
-        body="This account does not expose a default workspace yet, so the generator cannot create a QR code."
+        body="A default workspace is required before this account can create QR codes."
         title="Workspace is unavailable"
       />
     );
@@ -143,14 +149,7 @@ export function LinkGenerator() {
         createdQr.id,
         format
       );
-      const objectUrl = window.URL.createObjectURL(file.blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = file.fileName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(objectUrl);
+      startFileDownload(file);
     } catch (error) {
       setDownloadError(toErrorMessage(error));
     } finally {
@@ -163,11 +162,10 @@ export function LinkGenerator() {
       <section className="card">
         <div className="toolbar">
           <div>
-            <span className="badge">Live create flow</span>
+            <span className="badge">Create QR</span>
             <h1 className="h2">Create a link QR</h1>
             <p className="muted">
-              This form calls the real QR create endpoint and then reloads the created
-              record from the backend.
+              Save a real link QR to your dashboard and export it as PNG or SVG.
             </p>
           </div>
           <Link className="button secondary" href="/dashboard">
@@ -262,9 +260,7 @@ export function LinkGenerator() {
           >
             {isCreating ? "Creating..." : "Create QR"}
           </button>
-          <span className="muted">
-            Workspace: {authenticatedSession.user.defaultWorkspaceId}
-          </span>
+          <span className="muted">This QR code will be saved to your dashboard.</span>
         </div>
       </section>
 
@@ -274,7 +270,18 @@ export function LinkGenerator() {
           <div className="stack-lg" data-testid="generator-created-result">
             <div className="stack-sm">
               <h2 className="h2">{createdQr.title ?? createdQr.slug}</h2>
+              <div>Status: {getStatusLabel(createdQr.status)}</div>
               <div className="muted mono">{createdQr.slug}</div>
+              {getQrLinkTarget(createdQr) ? (
+                <a
+                  className="dashboard-link mono break-word"
+                  href={getQrLinkTarget(createdQr) ?? "#"}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {getQrLinkTarget(createdQr)}
+                </a>
+              ) : null}
               <a
                 className="dashboard-link mono"
                 href={createdQr.shortUrl}
@@ -313,12 +320,10 @@ export function LinkGenerator() {
             </div>
 
             {downloadError ? <div className="callout danger">{downloadError}</div> : null}
-
-            <pre className="code-block">{JSON.stringify(createdQr.content, null, 2)}</pre>
           </div>
         ) : (
           <div className="muted" data-testid="generator-empty-result">
-            No QR has been created in this session yet.
+            Create a QR code to see its slug, short URL, and downloads here.
           </div>
         )}
       </section>

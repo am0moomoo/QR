@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { fetchDashboardUser, logoutDashboardUser } from "../../lib/dashboard-api";
+import {
+  DashboardApiError,
+  fetchDashboardUser,
+  logoutDashboardUser
+} from "../../lib/dashboard-api";
 import type { DashboardUser } from "../../lib/dashboard-api";
 import type { SessionState, StoredSession } from "./dashboard-types";
 import {
@@ -55,7 +59,10 @@ export function useDashboardSession() {
 
         clearStoredSession();
         setSessionState({
-          errorMessage: toErrorMessage(error),
+          errorMessage:
+            error instanceof DashboardApiError && error.status === 401
+              ? "Your session has ended. Sign in again to continue."
+              : toErrorMessage(error),
           status: "unauthenticated",
           token: null,
           user: null

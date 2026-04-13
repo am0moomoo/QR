@@ -101,6 +101,9 @@ test("dashboard list, details, analytics, and settings use live API data", async
     shortUrl: string;
     slug: string;
   };
+  let duplicatedQr!: {
+    id: string;
+  };
   let inactiveQr!: {
     id: string;
     slug: string;
@@ -154,6 +157,9 @@ test("dashboard list, details, analytics, and settings use live API data", async
 
     await page.getByRole("link", { name: "Open dashboard" }).click();
     await expect(page).toHaveURL(`${appUrl}/dashboard`);
+    await expect(page.getByTestId(`qr-row-${activeQr.id}`)).toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId("qr-list-view")).toBeVisible();
     await expect(page.getByTestId(`qr-row-${activeQr.id}`)).toBeVisible();
   });
 
@@ -233,6 +239,13 @@ test("dashboard list, details, analytics, and settings use live API data", async
     await expect(page.getByTestId("qr-details-summary")).toContainText("Unique IPs (30d)");
     await expect(page.getByTestId("qr-download-png")).toBeVisible();
     await expect(page.getByTestId("qr-download-svg")).toBeVisible();
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("qr-download-png").click()
+    ]);
+
+    expect(download.suggestedFilename()).toContain(".png");
   });
 
   await test.step("open analytics page and verify live aggregate data", async () => {
@@ -261,13 +274,56 @@ test("dashboard list, details, analytics, and settings use live API data", async
       .getByRole("button", { name: "Save profile" })
       .click();
 
-    await expect(page.getByTestId("settings-view")).toContainText(
-      "Profile settings saved from the live API."
-    );
+    await expect(page.getByTestId("settings-view")).toContainText("Profile updated.");
     await expect(page.getByTestId("settings-view")).toContainText(updatedName);
     await expect(page.getByTestId("settings-view")).toContainText(
       "https://example.com/dashboard-avatar.png"
     );
     await expect(page.getByTestId("settings-view")).toContainText("uz");
+  });
+
+  await test.step("duplicate, archive, and delete a QR from the dashboard list", async () => {
+    await page.getByRole("link", { name: "QR list" }).click();
+    await expect(page).toHaveURL(`${appUrl}/dashboard`);
+    await expect(page.getByTestId(`qr-row-${activeQr.id}`)).toBeVisible();
+
+    await page.getByTestId(`qr-duplicate-${activeQr.id}`).click();
+    await expect(page.getByTestId("qr-list-view")).toContainText(
+      "A copy of the QR code is ready in your list."
+    );
+
+    duplicatedQr = await apiRequest<{
+      items: Array<{
+        id: string;
+        title: string | null;
+      }>;
+    }>("/qr-codes", {
+      token: registration.accessToken
+    }).then((response) => {
+      const createdItem = response.items.find(
+        (item) => item.title === `${activeTitle} copy`
+      );
+
+      if (!createdItem) {
+        throw new Error("Duplicated QR was not returned by the live list API.");
+      }
+
+      return createdItem;
+    });
+
+    await expect(page.getByTestId(`qr-row-${duplicatedQr.id}`)).toBeVisible();
+    await page.getByTestId(`qr-archive-${duplicatedQr.id}`).click();
+    await expect(page.getByTestId(`qr-row-${duplicatedQr.id}`)).toContainText("archived");
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByTestId(`qr-delete-${duplicatedQr.id}`).click();
+    await expect(page.getByTestId(`qr-row-${duplicatedQr.id}`)).toBeHidden();
+  });
+
+  await test.step("logout and keep protected routes usable", async () => {
+    await page.getByTestId("dashboard-logout").click();
+    await expect(page.getByTestId("dashboard-auth-form")).toBeVisible();
+    await page.goto(`${appUrl}/dashboard/analytics`);
+    await expect(page.getByTestId("dashboard-auth-form")).toBeVisible();
   });
 });

@@ -10,6 +10,12 @@ export function DashboardNavigation({
   return (
     <nav className="dashboard-nav">
       <Link
+        className="dashboard-nav-link"
+        href={"/generator" as Route}
+      >
+        Create QR
+      </Link>
+      <Link
         className={section === "list" ? "dashboard-nav-link active" : "dashboard-nav-link"}
         href="/dashboard"
       >

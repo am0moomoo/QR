@@ -126,6 +126,15 @@ export function getQrDisplayName(qrCode: DashboardQrCode) {
   return qrCode.title?.trim() || qrCode.slug;
 }
 
+export function getQrLinkTarget(qrCode: DashboardQrCode) {
+  const link = qrCode.content?.link;
+  return typeof link === "string" ? link : null;
+}
+
+export function formatBooleanLabel(value: boolean) {
+  return value ? "Enabled" : "Disabled";
+}
+
 export function getStatusTone(status: DashboardQrCode["status"]) {
   switch (status) {
     case "ACTIVE":
@@ -203,4 +212,15 @@ export function replaceStoredUser(session: StoredSession, user: DashboardUser) {
     accessToken: session.accessToken,
     user
   });
+}
+
+export function startFileDownload(file: { blob: Blob; fileName: string }) {
+  const objectUrl = window.URL.createObjectURL(file.blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = file.fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(objectUrl);
 }

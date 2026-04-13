@@ -3,8 +3,8 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "QR Platform Starter",
-  description: "Codex-ready starter repo for a dynamic QR platform"
+  title: "QRFlow",
+  description: "Create QR codes, download assets, and review scan analytics."
 };
 
 export default function RootLayout({
@@ -15,12 +15,11 @@ export default function RootLayout({
       <body>
         <div className="container">
           <header className="nav">
-            <Link href="/" className="badge">QR Platform Starter</Link>
+            <Link href="/" className="badge">QRFlow</Link>
             <nav className="nav-links">
+              <Link href="/">Home</Link>
               <Link href="/generator">Generator</Link>
-              <Link href="/pricing">Pricing</Link>
               <Link href="/dashboard">Dashboard</Link>
-              <Link href="/api-docs" className="button secondary">API</Link>
             </nav>
           </header>
           {children}

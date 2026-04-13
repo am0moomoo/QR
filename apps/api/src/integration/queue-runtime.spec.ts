@@ -149,6 +149,7 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
     return;
   }
 
+  let stage = "bootstrap";
   const server = app!.getHttpServer();
   const workerPipeline = workerContext!.get(QrAssetPipelineService);
   const workerAnalytics = workerContext!.get(AnalyticsService);
@@ -170,215 +171,258 @@ test("queue runtime: BullMQ render, scan-event, and aggregate jobs retry and sta
     return originalRenderAndSync(...args);
   }) as QrAssetPipelineService["renderAndSync"];
 
-  const registration = await request(server)
-    .post("/api/v1/auth/register")
-    .send({
-      email,
-      fullName: "Queue Runtime Owner",
-      password
-    })
-    .expect(201);
+  try {
+    stage = "register";
+    const registration = await request(server)
+      .post("/api/v1/auth/register")
+      .send({
+        email,
+        fullName: "Queue Runtime Owner",
+        password
+      })
+      .expect(201);
 
-  const workspace = await prisma!.workspace.findFirstOrThrow({
-    where: {
-      ownerUserId: registration.body.user.id
-    }
-  });
+    stage = "load-workspace";
+    const workspace = await prisma!.workspace.findFirstOrThrow({
+      where: {
+        ownerUserId: registration.body.user.id
+      }
+    });
 
-  const bearerToken = registration.body.accessToken as string;
-  const createQr = await request(server)
-    .post("/api/v1/qr-codes")
-    .set("Authorization", `Bearer ${bearerToken}`)
-    .send({
-      content: {
-        link: "https://example.com/queue-runtime"
-      },
-      design: {
-        backgroundColor: "#ffffff",
-        cornersInner: "square",
-        cornersInnerColor: "#111111",
-        cornersOuter: "square",
-        cornersOuterColor: "#111111",
-        errorCorrection: "M",
-        logoAssetId: null,
-        logoHideBg: true,
-        pattern: "square",
-        patternColor: "#111111",
-        quietZoneModules: 4,
-        sizePx: 512
-      },
-      exports: ["png", "svg"],
-      settings: {
-        adsEnabled: true,
-        doNotIndex: false,
-        expiresAt: null,
-        isOneTime: false,
-        maxScans: null,
-        password: null
-      },
-      title: "Queue runtime QR",
-      type: "link",
-      workspaceId: workspace.id
-    })
-    .expect(201);
-
-  assert.ok(renderFailures >= 2, "Render job should retry after one worker failure.");
-
-  await Promise.all([
-    request(server)
-      .post(`/api/v1/qr-codes/${createQr.body.id}/render`)
+    const bearerToken = registration.body.accessToken as string;
+    stage = "create-qr";
+    const createQr = await request(server)
+      .post("/api/v1/qr-codes")
       .set("Authorization", `Bearer ${bearerToken}`)
-      .expect(200),
-    request(server)
-      .post(`/api/v1/qr-codes/${createQr.body.id}/render`)
-      .set("Authorization", `Bearer ${bearerToken}`)
-      .expect(200)
-  ]);
+      .send({
+        content: {
+          link: "https://example.com/queue-runtime"
+        },
+        design: {
+          backgroundColor: "#ffffff",
+          cornersInner: "square",
+          cornersInnerColor: "#111111",
+          cornersOuter: "square",
+          cornersOuterColor: "#111111",
+          errorCorrection: "M",
+          logoAssetId: null,
+          logoHideBg: true,
+          pattern: "square",
+          patternColor: "#111111",
+          quietZoneModules: 4,
+          sizePx: 512
+        },
+        exports: ["png", "svg"],
+        settings: {
+          adsEnabled: true,
+          doNotIndex: false,
+          expiresAt: null,
+          isOneTime: false,
+          maxScans: null,
+          password: null
+        },
+        title: "Queue runtime QR",
+        type: "link",
+        workspaceId: workspace.id
+      })
+      .expect(201);
 
-  const qrAssets = await prisma!.qRAsset.findMany({
-    where: {
-      kind: "QR_IMAGE",
-      qrCodeId: createQr.body.id
-    }
-  });
-  assert.equal(qrAssets.length, 2);
-  assert.equal(new Set(qrAssets.map((asset) => asset.storageKey)).size, 2);
+    stage = "assert-render-retry";
+    assert.ok(
+      renderFailures >= 2,
+      `Render job should retry after one worker failure. Saw renderFailures=${renderFailures}.`
+    );
 
-  let rawFailures = 0;
-  let aggregateFailures = 0;
-  const originalRecordRawScanEvent =
-    workerAnalytics.recordRawScanEvent.bind(workerAnalytics);
-  const originalRecomputeDailyAggregate =
-    workerAnalytics.recomputeDailyAggregate.bind(workerAnalytics);
+    stage = "rerender-concurrent";
+    await Promise.all([
+      request(server)
+        .post(`/api/v1/qr-codes/${createQr.body.id}/render`)
+        .set("Authorization", `Bearer ${bearerToken}`)
+        .expect(200),
+      request(server)
+        .post(`/api/v1/qr-codes/${createQr.body.id}/render`)
+        .set("Authorization", `Bearer ${bearerToken}`)
+        .expect(200)
+    ]);
 
-  workerAnalytics.recordRawScanEvent = (async (...args: Parameters<AnalyticsService["recordRawScanEvent"]>) => {
-    rawFailures += 1;
+    stage = "assert-render-assets";
+    const qrAssets = await prisma!.qRAsset.findMany({
+      where: {
+        kind: "QR_IMAGE",
+        qrCodeId: createQr.body.id
+      }
+    });
+    assert.equal(qrAssets.length, 2, `Expected exactly two QR assets, saw ${qrAssets.length}.`);
+    assert.equal(
+      new Set(qrAssets.map((asset) => asset.storageKey)).size,
+      2,
+      "Expected PNG and SVG assets to keep distinct storage keys."
+    );
 
-    if (rawFailures === 1) {
-      throw new Error("raw scan event failed once for retry verification");
-    }
+    let rawFailures = 0;
+    let aggregateFailures = 0;
+    const originalRecordRawScanEvent =
+      workerAnalytics.recordRawScanEvent.bind(workerAnalytics);
+    const originalRecomputeDailyAggregate =
+      workerAnalytics.recomputeDailyAggregate.bind(workerAnalytics);
 
-    return originalRecordRawScanEvent(...args);
-  }) as AnalyticsService["recordRawScanEvent"];
+    workerAnalytics.recordRawScanEvent = (async (...args: Parameters<AnalyticsService["recordRawScanEvent"]>) => {
+      rawFailures += 1;
 
-  workerAnalytics.recomputeDailyAggregate = (async (...args: Parameters<AnalyticsService["recomputeDailyAggregate"]>) => {
-    aggregateFailures += 1;
+      if (rawFailures === 1) {
+        throw new Error("raw scan event failed once for retry verification");
+      }
 
-    if (aggregateFailures === 1) {
-      throw new Error("aggregate failed once for retry verification");
-    }
+      return originalRecordRawScanEvent(...args);
+    }) as AnalyticsService["recordRawScanEvent"];
 
-    return originalRecomputeDailyAggregate(...args);
-  }) as AnalyticsService["recomputeDailyAggregate"];
+    workerAnalytics.recomputeDailyAggregate = (async (...args: Parameters<AnalyticsService["recomputeDailyAggregate"]>) => {
+      aggregateFailures += 1;
 
-  const requestId = `queue-runtime-${suffix}`;
-  const scannedAt = new Date();
+      if (aggregateFailures === 1) {
+        throw new Error("aggregate failed once for retry verification");
+      }
 
-  await producerScanEvents.recordScanEvent({
-    awaitAggregate: true,
-    browser: "chrome",
-    country: "US",
-    deviceType: "desktop",
-    ipHash: "queue-runtime-ip",
-    language: "en",
-    openedOk: true,
-    os: "windows",
-    outcome: ScanOutcome.REDIRECTED,
-    qrCodeId: createQr.body.id,
-    referrer: "https://example.com/referrer",
-    requestId,
-    scannedAt,
-    userAgent: "Queue Runtime Browser"
-  });
+      return originalRecomputeDailyAggregate(...args);
+    }) as AnalyticsService["recomputeDailyAggregate"];
 
-  assert.ok(rawFailures >= 2, "Scan-event job should retry after one worker failure.");
-  assert.ok(
-    aggregateFailures >= 2,
-    "Aggregate job should retry after one worker failure."
-  );
+    const requestId = `queue-runtime-${suffix}`;
+    const scannedAt = new Date();
 
-  const rawEvents = await prisma!.scanEvent.findMany({
-    where: {
-      qrCodeId: createQr.body.id,
-      requestId
-    }
-  });
-  assert.equal(rawEvents.length, 1);
-
-  const firstAggregate = await prisma!.scanAggregateDaily.findFirstOrThrow({
-    where: {
-      qrCodeId: createQr.body.id
-    }
-  });
-  assert.equal(firstAggregate.scans, 1);
-  assert.equal(firstAggregate.uniqueIps, 1);
-
-  await producerScanEvents.recordScanEvent({
-    awaitAggregate: true,
-    browser: "chrome",
-    country: "US",
-    deviceType: "desktop",
-    ipHash: "queue-runtime-ip",
-    language: "en",
-    openedOk: true,
-    os: "windows",
-    outcome: ScanOutcome.REDIRECTED,
-    qrCodeId: createQr.body.id,
-    referrer: "https://example.com/referrer",
-    requestId,
-    scannedAt,
-    userAgent: "Queue Runtime Browser"
-  });
-
-  const dedupedEvents = await prisma!.scanEvent.findMany({
-    where: {
-      qrCodeId: createQr.body.id,
-      requestId
-    }
-  });
-  assert.equal(dedupedEvents.length, 1);
-
-  await prisma!.scanEvent.create({
-    data: {
-      browser: "firefox",
-      country: "DE",
+    stage = "queue-scan-event";
+    await producerScanEvents.recordScanEvent({
+      awaitAggregate: true,
+      browser: "chrome",
+      country: "US",
       deviceType: "desktop",
-      ipHash: "queue-runtime-ip-2",
-      language: "de",
+      ipHash: "queue-runtime-ip",
+      language: "en",
       openedOk: true,
-      os: "linux",
+      os: "windows",
       outcome: ScanOutcome.REDIRECTED,
       qrCodeId: createQr.body.id,
-      requestId: `${requestId}-second`,
-      scannedAt
-    }
-  });
+      referrer: "https://example.com/referrer",
+      requestId,
+      scannedAt,
+      userAgent: "Queue Runtime Browser"
+    });
 
-  let directAggregateFailures = 0;
-  workerAnalytics.recomputeDailyAggregate = (async (...args: Parameters<AnalyticsService["recomputeDailyAggregate"]>) => {
-    directAggregateFailures += 1;
+    stage = "assert-scan-retries";
+    assert.ok(
+      rawFailures >= 2,
+      `Scan-event job should retry after one worker failure. Saw rawFailures=${rawFailures}.`
+    );
+    assert.ok(
+      aggregateFailures >= 2,
+      `Aggregate job should retry after one worker failure. Saw aggregateFailures=${aggregateFailures}.`
+    );
 
-    if (directAggregateFailures === 1) {
-      throw new Error("direct aggregate failed once for retry verification");
-    }
+    stage = "assert-scan-event-persisted";
+    const rawEvents = await prisma!.scanEvent.findMany({
+      where: {
+        qrCodeId: createQr.body.id,
+        requestId
+      }
+    });
+    assert.equal(rawEvents.length, 1, `Expected one raw scan event, saw ${rawEvents.length}.`);
 
-    return originalRecomputeDailyAggregate(...args);
-  }) as AnalyticsService["recomputeDailyAggregate"];
+    stage = "assert-first-aggregate";
+    const firstAggregate = await prisma!.scanAggregateDaily.findFirstOrThrow({
+      where: {
+        qrCodeId: createQr.body.id
+      }
+    });
+    assert.equal(firstAggregate.scans, 1, `Expected first aggregate scans=1, saw ${firstAggregate.scans}.`);
+    assert.equal(
+      firstAggregate.uniqueIps,
+      1,
+      `Expected first aggregate uniqueIps=1, saw ${firstAggregate.uniqueIps}.`
+    );
 
-  await producerAggregates.queueDailyAggregate(createQr.body.id, scannedAt, {
-    waitForCompletion: true
-  });
+    stage = "queue-duplicate-scan-event";
+    await producerScanEvents.recordScanEvent({
+      awaitAggregate: true,
+      browser: "chrome",
+      country: "US",
+      deviceType: "desktop",
+      ipHash: "queue-runtime-ip",
+      language: "en",
+      openedOk: true,
+      os: "windows",
+      outcome: ScanOutcome.REDIRECTED,
+      qrCodeId: createQr.body.id,
+      referrer: "https://example.com/referrer",
+      requestId,
+      scannedAt,
+      userAgent: "Queue Runtime Browser"
+    });
 
-  assert.ok(
-    directAggregateFailures >= 2,
-    "Direct aggregate job should retry after one worker failure."
-  );
+    stage = "assert-deduped-scan-event";
+    const dedupedEvents = await prisma!.scanEvent.findMany({
+      where: {
+        qrCodeId: createQr.body.id,
+        requestId
+      }
+    });
+    assert.equal(
+      dedupedEvents.length,
+      1,
+      `Expected duplicate requestId to remain deduped at one row, saw ${dedupedEvents.length}.`
+    );
 
-  const finalAggregate = await prisma!.scanAggregateDaily.findFirstOrThrow({
-    where: {
-      qrCodeId: createQr.body.id
-    }
-  });
-  assert.equal(finalAggregate.scans, 2);
-  assert.equal(finalAggregate.uniqueIps, 2);
+    stage = "insert-second-raw-event";
+    await prisma!.scanEvent.create({
+      data: {
+        browser: "firefox",
+        country: "DE",
+        deviceType: "desktop",
+        ipHash: "queue-runtime-ip-2",
+        language: "de",
+        openedOk: true,
+        os: "linux",
+        outcome: ScanOutcome.REDIRECTED,
+        qrCodeId: createQr.body.id,
+        requestId: `${requestId}-second`,
+        scannedAt
+      }
+    });
+
+    let directAggregateFailures = 0;
+    workerAnalytics.recomputeDailyAggregate = (async (...args: Parameters<AnalyticsService["recomputeDailyAggregate"]>) => {
+      directAggregateFailures += 1;
+
+      if (directAggregateFailures === 1) {
+        throw new Error("direct aggregate failed once for retry verification");
+      }
+
+      return originalRecomputeDailyAggregate(...args);
+    }) as AnalyticsService["recomputeDailyAggregate"];
+
+    stage = "queue-direct-aggregate";
+    await producerAggregates.queueDailyAggregate(createQr.body.id, scannedAt, {
+      waitForCompletion: true
+    });
+
+    stage = "assert-direct-aggregate-retries";
+    assert.ok(
+      directAggregateFailures >= 2,
+      `Direct aggregate job should retry after one worker failure. Saw directAggregateFailures=${directAggregateFailures}.`
+    );
+
+    stage = "assert-final-aggregate";
+    const finalAggregate = await prisma!.scanAggregateDaily.findFirstOrThrow({
+      where: {
+        qrCodeId: createQr.body.id
+      }
+    });
+    assert.equal(finalAggregate.scans, 2, `Expected final aggregate scans=2, saw ${finalAggregate.scans}.`);
+    assert.equal(
+      finalAggregate.uniqueIps,
+      2,
+      `Expected final aggregate uniqueIps=2, saw ${finalAggregate.uniqueIps}.`
+    );
+  } catch (error) {
+    console.error(`[queue-runtime][stage=${stage}]`, error);
+    throw error;
+  }
 });

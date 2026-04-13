@@ -1,0 +1,858 @@
+openapi: 3.1.0
+info:
+  title: QRFlow API
+  version: 0.2.0
+  description: Implemented API surface for auth, QR CRUD, real PNG/SVG downloads, public scan routing, and QR analytics.
+servers:
+  - url: /api/v1
+tags:
+  - name: Health
+  - name: Auth
+  - name: QR Codes
+  - name: Billing
+  - name: Public
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        "200":
+          description: API is healthy
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register user and create default workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke current bearer session
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required: [success]
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Issue a password-reset token for a known email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForgotPasswordResponse"
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password with a valid token and create a fresh session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password reset completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+
+  /me:
+    get:
+      tags: [Auth]
+      summary: Current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    patch:
+      tags: [Auth]
+      summary: Update current user profile settings
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileUpdateRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /billing/plans:
+    get:
+      tags: [Billing]
+      summary: List starter billing plans
+      responses:
+        "200":
+          description: Plan list
+
+  /qr-codes:
+    get:
+      tags: [QR Codes]
+      summary: List QR codes owned by current user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: pageSize
+          schema:
+            type: integer
+            default: 20
+        - in: query
+          name: workspaceId
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/QRCodeStatus"
+      responses:
+        "200":
+          description: Paginated list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListQrCodesResponse"
+    post:
+      tags: [QR Codes]
+      summary: Create QR code
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateQRCodeRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateQRCodeResponse"
+
+  /qr-codes/{id}:
+    get:
+      tags: [QR Codes]
+      summary: Get QR code
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: QR code details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QRCode"
+    patch:
+      tags: [QR Codes]
+      summary: Update QR code without changing slug
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateQRCodeRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QRCode"
+    delete:
+      tags: [QR Codes]
+      summary: Soft delete QR code
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Deleted
+
+  /qr-codes/{id}/downloads:
+    get:
+      tags: [QR Codes]
+      summary: List QR asset downloads or stream a concrete PNG/SVG asset
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+        - in: query
+          name: format
+          schema:
+            $ref: "#/components/schemas/ExportFormat"
+          description: When provided, the endpoint streams the requested file instead of returning metadata.
+      responses:
+        "200":
+          description: Download metadata or file bytes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadsResponse"
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+                format: binary
+
+  /qr-codes/{id}/render:
+    post:
+      tags: [QR Codes]
+      summary: Regenerate PNG and SVG QR image assets
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Accepted
+
+  /qr-codes/{id}/analytics:
+    get:
+      tags: [QR Codes]
+      summary: Get daily scan aggregates and recent raw scan events for a QR code
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+        - in: query
+          name: from
+          schema:
+            type: string
+          description: Inclusive range start, usually YYYY-MM-DD.
+        - in: query
+          name: to
+          schema:
+            type: string
+          description: Inclusive range end, usually YYYY-MM-DD.
+      responses:
+        "200":
+          description: Analytics payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QRAnalyticsResponse"
+
+  /qr-codes/{id}/activate:
+    post:
+      tags: [QR Codes]
+      summary: Activate QR code
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Activated
+
+  /qr-codes/{id}/deactivate:
+    post:
+      tags: [QR Codes]
+      summary: Deactivate QR code
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Deactivated
+
+  /qr-codes/{id}/archive:
+    post:
+      tags: [QR Codes]
+      summary: Archive QR code
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Archived
+
+  /qr-codes/{id}/duplicate:
+    post:
+      tags: [QR Codes]
+      summary: Duplicate QR code with a new slug
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "201":
+          description: Duplicated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateQRCodeResponse"
+
+  /public/r/{slug}:
+    get:
+      tags: [Public]
+      summary: Resolve QR short URL
+      parameters:
+        - $ref: "#/components/parameters/SlugPath"
+      responses:
+        "302":
+          description: Redirected
+        "200":
+          description: Password form or landing page
+        "429":
+          description: Rate limited
+        "404":
+          description: Not found
+        "410":
+          description: QR is inactive or expired
+
+  /public/r/{slug}/password:
+    post:
+      tags: [Public]
+      summary: Submit QR password and continue scan flow
+      parameters:
+        - $ref: "#/components/parameters/SlugPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordRequest"
+      responses:
+        "302":
+          description: Redirected
+        "200":
+          description: Landing page or password prompt
+        "401":
+          description: Invalid password
+        "429":
+          description: Rate limited
+
+  /public/inactive:
+    get:
+      tags: [Public]
+      summary: Inactive QR page
+      responses:
+        "410":
+          description: Viewer-facing inactive page
+
+  /public/landing/{slug}:
+    get:
+      tags: [Public]
+      summary: Render a landing representation for non-redirect QR content
+      parameters:
+        - $ref: "#/components/parameters/SlugPath"
+      responses:
+        "200":
+          description: Landing page
+        "429":
+          description: Rate limited
+        "410":
+          description: QR is inactive
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+
+  parameters:
+    IdPath:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SlugPath:
+      in: path
+      name: slug
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    QRCodeStatus:
+      type: string
+      enum: [ACTIVE, INACTIVE, ARCHIVED, DELETED]
+
+    ExportFormat:
+      type: string
+      enum: [png, svg]
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        fullName:
+          type: [string, "null"]
+        avatarUrl:
+          type: [string, "null"]
+          format: uri
+        locale:
+          type: string
+      required: [id, email, fullName, avatarUrl, locale]
+
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        fullName:
+          type: [string, "null"]
+      required: [email, password]
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+      required: [email, password]
+
+    ForgotPasswordRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required: [email]
+
+    ForgotPasswordResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        resetToken:
+          type: [string, "null"]
+          description: Present in non-production environments to support local testing.
+      required: [success]
+
+    ResetPasswordRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          minLength: 8
+        token:
+          type: string
+      required: [password, token]
+
+    ProfileUpdateRequest:
+      type: object
+      properties:
+        fullName:
+          type: [string, "null"]
+        avatarUrl:
+          type: [string, "null"]
+          format: uri
+        locale:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        accessToken:
+          type: string
+      required: [user, accessToken]
+
+    PasswordRequest:
+      type: object
+      properties:
+        password:
+          type: string
+      required: [password]
+
+    QRCodeDesign:
+      type: object
+      properties:
+        sizePx:
+          type: integer
+        pattern:
+          type: string
+        patternColor:
+          type: string
+        backgroundColor:
+          type: string
+        cornersInner:
+          type: string
+        cornersInnerColor:
+          type: string
+        cornersOuter:
+          type: string
+        cornersOuterColor:
+          type: string
+        logoAssetId:
+          type: [string, "null"]
+          format: uuid
+        logoHideBg:
+          type: boolean
+        errorCorrection:
+          type: string
+          enum: [L, M, Q, H]
+        quietZoneModules:
+          type: integer
+
+    QRCodeSettings:
+      type: object
+      properties:
+        adsEnabled:
+          type: boolean
+        doNotIndex:
+          type: boolean
+        password:
+          type: [string, "null"]
+        isOneTime:
+          type: boolean
+        maxScans:
+          type: [integer, "null"]
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+
+    DownloadItem:
+      type: object
+      properties:
+        bytes:
+          type: [string, "null"]
+        checksum:
+          type: [string, "null"]
+        format:
+          type: string
+        url:
+          type: string
+      required: [format, url]
+
+    CreateQRCodeRequest:
+      type: object
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        folderId:
+          type: [string, "null"]
+          format: uuid
+        title:
+          type: [string, "null"]
+        type:
+          type: string
+        content:
+          type: object
+          additionalProperties: true
+        design:
+          $ref: "#/components/schemas/QRCodeDesign"
+        settings:
+          $ref: "#/components/schemas/QRCodeSettings"
+        exports:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExportFormat"
+      required: [workspaceId, type, content]
+
+    UpdateQRCodeRequest:
+      type: object
+      properties:
+        title:
+          type: [string, "null"]
+        folderId:
+          type: [string, "null"]
+          format: uuid
+        content:
+          type: object
+          additionalProperties: true
+        design:
+          $ref: "#/components/schemas/QRCodeDesign"
+        settings:
+          $ref: "#/components/schemas/QRCodeSettings"
+
+    QRCode:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        folderId:
+          type: [string, "null"]
+          format: uuid
+        title:
+          type: [string, "null"]
+        slug:
+          type: string
+        shortUrl:
+          type: string
+        type:
+          type: string
+        status:
+          $ref: "#/components/schemas/QRCodeStatus"
+        adsEnabled:
+          type: boolean
+        doNotIndex:
+          type: boolean
+        isOneTime:
+          type: boolean
+        maxScans:
+          type: [integer, "null"]
+        scansCount:
+          type: string
+        lastScanAt:
+          type: [string, "null"]
+          format: date-time
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        content:
+          type: [object, "null"]
+          additionalProperties: true
+        design:
+          type: [object, "null"]
+          additionalProperties: true
+        downloads:
+          type: array
+          items:
+            $ref: "#/components/schemas/DownloadItem"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - workspaceId
+        - slug
+        - shortUrl
+        - type
+        - status
+        - adsEnabled
+        - doNotIndex
+        - isOneTime
+        - scansCount
+        - downloads
+        - createdAt
+        - updatedAt
+
+    CreateQRCodeResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        shortUrl:
+          type: string
+        status:
+          $ref: "#/components/schemas/QRCodeStatus"
+        downloads:
+          type: array
+          items:
+            $ref: "#/components/schemas/DownloadItem"
+      required: [id, slug, shortUrl, status, downloads]
+
+    ListQrCodesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QRCode"
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+      required: [items, page, pageSize, total]
+
+    DownloadsResponse:
+      type: object
+      properties:
+        downloads:
+          type: array
+          items:
+            $ref: "#/components/schemas/DownloadItem"
+      required: [downloads]
+
+    AnalyticsDailyPoint:
+      type: object
+      properties:
+        day:
+          type: string
+        scans:
+          type: integer
+        uniqueIps:
+          type: integer
+        uniqueDevices:
+          type: integer
+        devices:
+          type: object
+          additionalProperties:
+            type: integer
+        countries:
+          type: object
+          additionalProperties:
+            type: integer
+        browsers:
+          type: object
+          additionalProperties:
+            type: integer
+        operatingSystems:
+          type: object
+          additionalProperties:
+            type: integer
+      required: [day, scans, uniqueIps]
+
+    AnalyticsEvent:
+      type: object
+      properties:
+        scannedAt:
+          type: string
+          format: date-time
+        outcome:
+          type: string
+        country:
+          type: [string, "null"]
+        deviceType:
+          type: [string, "null"]
+        browser:
+          type: [string, "null"]
+        language:
+          type: [string, "null"]
+        openedOk:
+          type: [boolean, "null"]
+        referrer:
+          type: [string, "null"]
+        requestId:
+          type: [string, "null"]
+      required: [scannedAt, outcome]
+
+    AnalyticsSummary:
+      type: object
+      properties:
+        scans:
+          type: integer
+        uniqueIps:
+          type: integer
+        uniqueDevices:
+          type: integer
+      required: [scans, uniqueIps, uniqueDevices]
+
+    QRAnalyticsResponse:
+      type: object
+      properties:
+        summary:
+          $ref: "#/components/schemas/AnalyticsSummary"
+        daily:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsDailyPoint"
+        recentEvents:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsEvent"
+      required: [summary, daily, recentEvents]

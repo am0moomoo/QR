@@ -1,0 +1,883 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException
+} from "@nestjs/common";
+import {
+  AssetFormat,
+  Prisma,
+  QRCodeStatus
+} from "@prisma/client";
+import { hash } from "bcryptjs";
+import { randomBytes } from "node:crypto";
+import {
+  type ExportFormat,
+  type QrType,
+  createQrCodeSchema,
+  getQrTargetUrl,
+  qrDesignSchema,
+  qrSettingsSchema,
+  updateQrCodeSchema,
+  validateQrContent
+} from "@qr/types";
+import { z } from "zod";
+import { AnalyticsService } from "../../common/analytics.service";
+import { PrismaService } from "../../common/prisma.service";
+import {
+  QrRenderService,
+  type RenderedQrAsset
+} from "../../common/qr-render.service";
+import { SlugCacheService } from "../../common/slug-cache.service";
+import { StorageService } from "../../common/storage.service";
+import { TelemetryService } from "../../common/telemetry.service";
+import { parseWithSchema } from "../../common/zod.util";
+
+const listQrCodesQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.nativeEnum(QRCodeStatus).optional(),
+  type: z.string().optional(),
+  workspaceId: z.string().uuid().optional()
+});
+
+const qrAnalyticsQuerySchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional()
+});
+
+type QrCodeRecord = Prisma.QRCodeGetPayload<{
+  include: {
+    assets: true;
+    content: true;
+    design: true;
+    redirectRules: true;
+    workspace: true;
+  };
+}>;
+
+type DownloadFileResponse = {
+  body: Buffer;
+  contentLength: bigint;
+  contentType: string;
+  fileName: string;
+};
+
+type StoredAssetDraft = {
+  bytes: bigint;
+  checksum: string;
+  format: AssetFormat;
+  heightPx: number;
+  storageKey: string;
+  widthPx: number;
+};
+
+@Injectable()
+export class QrCodesService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly telemetry: TelemetryService,
+    private readonly slugCache: SlugCacheService<QrCodeRecord>,
+    private readonly storage: StorageService,
+    private readonly qrRender: QrRenderService,
+    private readonly analytics: AnalyticsService
+  ) {}
+
+  async list(userId: string, query: unknown) {
+    const input = parseWithSchema(listQrCodesQuerySchema, query);
+    const page = input.page ?? 1;
+    const pageSize = input.pageSize ?? 20;
+    const skip = (page - 1) * pageSize;
+    const where: Prisma.QRCodeWhereInput = {
+      deletedAt: null,
+      ownerUserId: userId
+    };
+
+    if (input.status) {
+      where.status = input.status;
+    }
+
+    if (input.type) {
+      where.type = input.type;
+    }
+
+    if (input.workspaceId) {
+      where.workspaceId = input.workspaceId;
+    }
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.qRCode.findMany({
+        where,
+        include: {
+          assets: true,
+          content: true,
+          design: true,
+          redirectRules: true,
+          workspace: true
+        },
+        orderBy: {
+          updatedAt: "desc"
+        },
+        skip,
+        take: pageSize
+      }),
+      this.prisma.qRCode.count({ where })
+    ]);
+
+    return {
+      items: items.map((item) => this.toQrResponse(item)),
+      page,
+      pageSize,
+      total
+    };
+  }
+
+  async create(userId: string, payload: unknown) {
+    const input = parseWithSchema(createQrCodeSchema, payload);
+    const design = qrDesignSchema.parse(input.design ?? {});
+    const settings = qrSettingsSchema.parse(input.settings ?? {});
+    const workspace = await this.requireWorkspaceAccess(input.workspaceId, userId);
+    const content = validateQrContent(input.type, input.content);
+    const targetUrl = getQrTargetUrl(input.type, content);
+    const slug = await this.generateUniqueSlug();
+    const passwordHash = settings.password
+      ? await hash(settings.password, 12)
+      : null;
+
+    if (input.folderId) {
+      await this.requireFolderAccess(input.folderId, input.workspaceId, userId);
+    }
+
+    const qrCode = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.qRCode.create({
+        data: {
+          adsEnabled: settings.adsEnabled,
+          doNotIndex: settings.doNotIndex,
+          expiresAt: settings.expiresAt ? new Date(settings.expiresAt) : null,
+          folderId: input.folderId,
+          isOneTime: settings.isOneTime,
+          maxScans: settings.maxScans,
+          ownerUserId: userId,
+          passwordHash,
+          slug,
+          title: input.title,
+          type: input.type,
+          workspaceId: workspace.id
+        }
+      });
+
+      await tx.qRContent.create({
+        data: {
+          payload: content as Prisma.InputJsonValue,
+          qrCodeId: created.id,
+          targetUrl
+        }
+      });
+
+      await tx.qRDesign.create({
+        data: {
+          backgroundColor: design.backgroundColor,
+          cornersInner: design.cornersInner,
+          cornersInnerColor: design.cornersInnerColor,
+          cornersOuter: design.cornersOuter,
+          cornersOuterColor: design.cornersOuterColor,
+          errorCorrection: design.errorCorrection,
+          logoAssetId: design.logoAssetId,
+          logoHideBg: design.logoHideBg,
+          pattern: design.pattern,
+          patternColor: design.patternColor,
+          qrCodeId: created.id,
+          quietZoneModules: design.quietZoneModules,
+          sizePx: design.sizePx
+        }
+      });
+
+      return tx.qRCode.findUniqueOrThrow({
+        where: { id: created.id },
+        include: {
+          assets: true,
+          content: true,
+          design: true,
+          redirectRules: true,
+          workspace: true
+        }
+      });
+    });
+
+    const createdQr = await this.syncAssets(
+      qrCode,
+      input.exports ?? ["png", "svg"]
+    );
+
+    await this.slugCache.set(createdQr.slug, createdQr);
+    this.telemetry.track("qr.created", {
+      qrCodeId: createdQr.id,
+      type: createdQr.type,
+      userId,
+      workspaceId: createdQr.workspaceId
+    });
+
+    return this.toCreateQrResponse(createdQr);
+  }
+
+  async getOne(userId: string, id: string) {
+    const qrCode = await this.requireQrCodeAccess(id, userId);
+    return this.toQrResponse(qrCode);
+  }
+
+  async update(userId: string, id: string, payload: unknown) {
+    const input = parseWithSchema(updateQrCodeSchema, payload);
+    const existingQr = await this.requireQrCodeAccess(id, userId);
+    const nextContent = input.content
+      ? validateQrContent(existingQr.type as QrType, input.content)
+      : (existingQr.content?.payload as Prisma.JsonObject | null);
+    const nextTargetUrl = nextContent
+      ? getQrTargetUrl(existingQr.type as QrType, nextContent)
+      : existingQr.content?.targetUrl ?? null;
+    const nextDesign = input.design
+      ? qrDesignSchema.parse(input.design)
+      : existingQr.design;
+    const designChanged = Boolean(input.design);
+    const passwordHash =
+      input.settings && "password" in input.settings
+        ? input.settings.password
+          ? await hash(input.settings.password, 12)
+          : null
+        : existingQr.passwordHash;
+
+    const updatedQr = await this.prisma.$transaction(async (tx) => {
+      await tx.qRCode.update({
+        where: { id },
+        data: {
+          adsEnabled: input.settings?.adsEnabled ?? existingQr.adsEnabled,
+          doNotIndex: input.settings?.doNotIndex ?? existingQr.doNotIndex,
+          expiresAt:
+            input.settings?.expiresAt !== undefined
+              ? input.settings.expiresAt
+                ? new Date(input.settings.expiresAt)
+                : null
+              : existingQr.expiresAt,
+          folderId:
+            input.folderId !== undefined ? input.folderId : existingQr.folderId,
+          isOneTime: input.settings?.isOneTime ?? existingQr.isOneTime,
+          maxScans:
+            input.settings?.maxScans !== undefined
+              ? input.settings.maxScans
+              : existingQr.maxScans,
+          passwordHash,
+          title: input.title !== undefined ? input.title : existingQr.title
+        }
+      });
+
+      if (nextContent) {
+        await tx.qRContent.upsert({
+          where: { qrCodeId: id },
+          update: {
+            payload: nextContent as Prisma.InputJsonValue,
+            targetUrl: nextTargetUrl
+          },
+          create: {
+            payload: nextContent as Prisma.InputJsonValue,
+            qrCodeId: id,
+            targetUrl: nextTargetUrl
+          }
+        });
+      }
+
+      if (nextDesign) {
+        await tx.qRDesign.upsert({
+          where: { qrCodeId: id },
+          update: {
+            backgroundColor: nextDesign.backgroundColor,
+            cornersInner: nextDesign.cornersInner,
+            cornersInnerColor: nextDesign.cornersInnerColor,
+            cornersOuter: nextDesign.cornersOuter,
+            cornersOuterColor: nextDesign.cornersOuterColor,
+            errorCorrection: nextDesign.errorCorrection,
+            logoAssetId: nextDesign.logoAssetId,
+            logoHideBg: nextDesign.logoHideBg,
+            pattern: nextDesign.pattern,
+            patternColor: nextDesign.patternColor,
+            quietZoneModules: nextDesign.quietZoneModules,
+            sizePx: nextDesign.sizePx
+          },
+          create: {
+            backgroundColor: nextDesign.backgroundColor,
+            cornersInner: nextDesign.cornersInner,
+            cornersInnerColor: nextDesign.cornersInnerColor,
+            cornersOuter: nextDesign.cornersOuter,
+            cornersOuterColor: nextDesign.cornersOuterColor,
+            errorCorrection: nextDesign.errorCorrection,
+            logoAssetId: nextDesign.logoAssetId,
+            logoHideBg: nextDesign.logoHideBg,
+            pattern: nextDesign.pattern,
+            patternColor: nextDesign.patternColor,
+            qrCodeId: id,
+            quietZoneModules: nextDesign.quietZoneModules,
+            sizePx: nextDesign.sizePx
+          }
+        });
+      }
+
+      return tx.qRCode.findUniqueOrThrow({
+        where: { id },
+        include: {
+          assets: true,
+          content: true,
+          design: true,
+          redirectRules: true,
+          workspace: true
+        }
+      });
+    });
+
+    const finalQr =
+      designChanged || this.getExistingExportFormats(updatedQr).length === 0
+        ? await this.syncAssets(
+            updatedQr,
+            this.getExistingExportFormats(existingQr)
+          )
+        : updatedQr;
+
+    await this.slugCache.set(finalQr.slug, finalQr);
+    this.telemetry.track("qr.updated", {
+      qrCodeId: finalQr.id,
+      userId
+    });
+
+    return this.toQrResponse(finalQr);
+  }
+
+  async remove(userId: string, id: string) {
+    const qrCode = await this.requireQrCodeAccess(id, userId);
+
+    await this.prisma.qRCode.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        status: "DELETED"
+      }
+    });
+
+    await this.slugCache.delete(qrCode.slug);
+    await this.storage.deleteObjects(
+      qrCode.assets
+        .filter((asset) => asset.kind === "QR_IMAGE")
+        .map((asset) => asset.storageKey)
+    );
+
+    this.telemetry.track("qr.deleted", {
+      qrCodeId: id,
+      userId
+    });
+
+    return {
+      success: true
+    };
+  }
+
+  async listDownloads(userId: string, id: string) {
+    const qrCode = await this.requireQrCodeAccess(id, userId);
+    return {
+      downloads: this.toDownloadItems(qrCode)
+    };
+  }
+
+  async download(userId: string, id: string, format: string): Promise<DownloadFileResponse> {
+    const qrCode = await this.requireQrCodeAccess(id, userId);
+    const normalizedFormat = this.normalizeDownloadFormat(format);
+    let asset = qrCode.assets.find(
+      (currentAsset) =>
+        currentAsset.kind === "QR_IMAGE" &&
+        currentAsset.format === this.toAssetFormat(normalizedFormat)
+    );
+
+    if (!asset) {
+      const refreshed = await this.syncAssets(qrCode, [
+        ...new Set([
+          ...this.getExistingExportFormats(qrCode),
+          normalizedFormat
+        ])
+      ] as ExportFormat[]);
+      asset = refreshed.assets.find(
+        (currentAsset) =>
+          currentAsset.kind === "QR_IMAGE" &&
+          currentAsset.format === this.toAssetFormat(normalizedFormat)
+      );
+    }
+
+    if (!asset) {
+      throw new NotFoundException("QR download was not generated");
+    }
+
+    const storedObject = await this.storage.getObject(asset.storageKey);
+
+    return {
+      body: storedObject.body,
+      contentLength: storedObject.bytes,
+      contentType: this.getContentTypeForAssetFormat(asset.format),
+      fileName: `${qrCode.slug}.${normalizedFormat}`
+    };
+  }
+
+  async render(userId: string, id: string) {
+    const qrCode = await this.requireQrCodeAccess(id, userId);
+    const refreshed = await this.syncAssets(
+      qrCode,
+      this.getExistingExportFormats(qrCode)
+    );
+
+    this.telemetry.track("qr.render_requested", {
+      qrCodeId: id,
+      userId
+    });
+
+    return {
+      accepted: true,
+      downloads: this.toDownloadItems(refreshed)
+    };
+  }
+
+  async changeStatus(userId: string, id: string, status: QRCodeStatus) {
+    const qrCode = await this.requireQrCodeAccess(id, userId);
+    const updated = await this.prisma.qRCode.update({
+      where: { id },
+      data: {
+        archivedAt: status === "ARCHIVED" ? new Date() : null,
+        status
+      },
+      include: {
+        assets: true,
+        content: true,
+        design: true,
+        redirectRules: true,
+        workspace: true
+      }
+    });
+
+    if (status === "ACTIVE") {
+      await this.slugCache.set(qrCode.slug, updated);
+    } else {
+      await this.slugCache.delete(qrCode.slug);
+    }
+
+    this.telemetry.track("qr.status_changed", {
+      qrCodeId: id,
+      status,
+      userId
+    });
+
+    return this.toQrResponse(updated);
+  }
+
+  async duplicate(userId: string, id: string) {
+    const qrCode = await this.requireQrCodeAccess(id, userId);
+    const slug = await this.generateUniqueSlug();
+
+    const duplicated = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.qRCode.create({
+        data: {
+          adsEnabled: qrCode.adsEnabled,
+          doNotIndex: qrCode.doNotIndex,
+          expiresAt: qrCode.expiresAt,
+          folderId: qrCode.folderId,
+          isOneTime: qrCode.isOneTime,
+          maxScans: qrCode.maxScans,
+          ownerUserId: qrCode.ownerUserId,
+          passwordHash: qrCode.passwordHash,
+          slug,
+          title: qrCode.title ? `${qrCode.title} copy` : "Untitled copy",
+          type: qrCode.type,
+          workspaceId: qrCode.workspaceId
+        }
+      });
+
+      if (qrCode.content) {
+        await tx.qRContent.create({
+          data: {
+            payload: this.toInputJson(qrCode.content.payload),
+            qrCodeId: created.id,
+            targetUrl: qrCode.content.targetUrl
+          }
+        });
+      }
+
+      if (qrCode.design) {
+        await tx.qRDesign.create({
+          data: {
+            backgroundColor: qrCode.design.backgroundColor,
+            cornersInner: qrCode.design.cornersInner,
+            cornersInnerColor: qrCode.design.cornersInnerColor,
+            cornersOuter: qrCode.design.cornersOuter,
+            cornersOuterColor: qrCode.design.cornersOuterColor,
+            errorCorrection: qrCode.design.errorCorrection,
+            logoAssetId: qrCode.design.logoAssetId,
+            logoHideBg: qrCode.design.logoHideBg,
+            pattern: qrCode.design.pattern,
+            patternColor: qrCode.design.patternColor,
+            qrCodeId: created.id,
+            quietZoneModules: qrCode.design.quietZoneModules,
+            sizePx: qrCode.design.sizePx
+          }
+        });
+      }
+
+      return tx.qRCode.findUniqueOrThrow({
+        where: { id: created.id },
+        include: {
+          assets: true,
+          content: true,
+          design: true,
+          redirectRules: true,
+          workspace: true
+        }
+      });
+    });
+
+    const duplicatedQr = await this.syncAssets(
+      duplicated,
+      this.getExistingExportFormats(qrCode)
+    );
+
+    await this.slugCache.set(duplicatedQr.slug, duplicatedQr);
+    this.telemetry.track("qr.duplicated", {
+      fromQrCodeId: id,
+      qrCodeId: duplicatedQr.id,
+      userId
+    });
+
+    return this.toCreateQrResponse(duplicatedQr);
+  }
+
+  async getAnalytics(userId: string, id: string, query: unknown) {
+    await this.requireQrCodeAccess(id, userId);
+    const input = parseWithSchema(qrAnalyticsQuerySchema, query);
+    return this.analytics.getQrAnalytics(id, input);
+  }
+
+  async requireQrCodeAccess(id: string, userId: string) {
+    const qrCode = await this.prisma.qRCode.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        OR: [
+          { ownerUserId: userId },
+          {
+            workspace: {
+              members: {
+                some: {
+                  userId
+                }
+              }
+            }
+          }
+        ]
+      },
+      include: {
+        assets: true,
+        content: true,
+        design: true,
+        redirectRules: true,
+        workspace: true
+      }
+    });
+
+    if (!qrCode) {
+      throw new NotFoundException("QR code not found");
+    }
+
+    return qrCode;
+  }
+
+  private async requireWorkspaceAccess(workspaceId: string, userId: string) {
+    const workspace = await this.prisma.workspace.findFirst({
+      where: {
+        id: workspaceId,
+        OR: [
+          { ownerUserId: userId },
+          {
+            members: {
+              some: {
+                userId
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    if (!workspace) {
+      throw new ForbiddenException("Workspace is not accessible");
+    }
+
+    return workspace;
+  }
+
+  private async requireFolderAccess(
+    folderId: string,
+    workspaceId: string,
+    userId: string
+  ) {
+    const folder = await this.prisma.folder.findFirst({
+      where: {
+        id: folderId,
+        workspaceId,
+        OR: [
+          { ownerUserId: userId },
+          {
+            workspace: {
+              members: {
+                some: {
+                  userId
+                }
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    if (!folder) {
+      throw new ForbiddenException("Folder is not accessible");
+    }
+
+    return folder;
+  }
+
+  private async syncAssets(
+    qrCode: QrCodeRecord,
+    requestedFormats: ExportFormat[]
+  ) {
+    const formats = this.getSupportedExportFormats(requestedFormats);
+    const oldStorageKeys = qrCode.assets
+      .filter((asset) => asset.kind === "QR_IMAGE")
+      .map((asset) => asset.storageKey);
+    const uploadedStorageKeys: string[] = [];
+    const renderedAssets: StoredAssetDraft[] = [];
+
+    try {
+      for (const format of formats) {
+        const renderedAsset = await this.qrRender.render({
+          design: this.toRenderDesign(qrCode.design),
+          format,
+          shortUrl: this.buildShortUrl(qrCode.slug),
+          slug: qrCode.slug
+        });
+        const storageKey = this.buildStorageKey(qrCode, renderedAsset);
+        await this.storage.putObject(storageKey, renderedAsset.body);
+        uploadedStorageKeys.push(storageKey);
+        renderedAssets.push({
+          bytes: renderedAsset.bytes,
+          checksum: renderedAsset.checksum,
+          format: renderedAsset.format,
+          heightPx: renderedAsset.heightPx,
+          storageKey,
+          widthPx: renderedAsset.widthPx
+        });
+      }
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.qRAsset.deleteMany({
+          where: {
+            kind: "QR_IMAGE",
+            qrCodeId: qrCode.id
+          }
+        });
+
+        if (renderedAssets.length > 0) {
+          await tx.qRAsset.createMany({
+            data: renderedAssets.map((asset) => ({
+              bytes: asset.bytes,
+              checksum: asset.checksum,
+              format: asset.format,
+              heightPx: asset.heightPx,
+              kind: "QR_IMAGE",
+              publicUrl: this.buildDownloadUrl(
+                qrCode.id,
+                asset.format.toLowerCase()
+              ),
+              qrCodeId: qrCode.id,
+              storageKey: asset.storageKey,
+              widthPx: asset.widthPx,
+              workspaceId: qrCode.workspaceId
+            }))
+          });
+        }
+      });
+    } catch (error) {
+      await this.storage.deleteObjects(uploadedStorageKeys);
+      throw error;
+    }
+
+    await this.storage.deleteObjects(
+      oldStorageKeys.filter(
+        (storageKey) => !uploadedStorageKeys.includes(storageKey)
+      )
+    );
+
+    return this.prisma.qRCode.findUniqueOrThrow({
+      where: { id: qrCode.id },
+      include: {
+        assets: true,
+        content: true,
+        design: true,
+        redirectRules: true,
+        workspace: true
+      }
+    });
+  }
+
+  private getSupportedExportFormats(
+    requestedFormats: ExportFormat[]
+  ): ExportFormat[] {
+    const uniqueFormats = [...new Set(requestedFormats)] as ExportFormat[];
+
+    if (uniqueFormats.some((format) => format !== "png" && format !== "svg")) {
+      throw new BadRequestException(
+        "Only png and svg exports are implemented in this build."
+      );
+    }
+
+    return uniqueFormats.length > 0
+      ? uniqueFormats
+      : (["png", "svg"] as ExportFormat[]);
+  }
+
+  private buildStorageKey(qrCode: QrCodeRecord, renderedAsset: RenderedQrAsset) {
+    return `qr/${qrCode.workspaceId}/${qrCode.id}/${renderedAsset.checksum}.${renderedAsset.extension}`;
+  }
+
+  private getExistingExportFormats(qrCode: QrCodeRecord): ExportFormat[] {
+    const formats = qrCode.assets
+      .filter((asset) => asset.kind === "QR_IMAGE")
+      .map((asset) => asset.format.toLowerCase() as ExportFormat);
+
+    return formats.length > 0 ? formats : ["png", "svg"];
+  }
+
+  private toCreateQrResponse(qrCode: QrCodeRecord) {
+    return {
+      downloads: this.toDownloadItems(qrCode),
+      id: qrCode.id,
+      shortUrl: this.buildShortUrl(qrCode.slug),
+      slug: qrCode.slug,
+      status: qrCode.status
+    };
+  }
+
+  private toQrResponse(qrCode: QrCodeRecord) {
+    return {
+      adsEnabled: qrCode.adsEnabled,
+      content: qrCode.content?.payload ?? null,
+      createdAt: qrCode.createdAt.toISOString(),
+      design: qrCode.design,
+      doNotIndex: qrCode.doNotIndex,
+      downloads: this.toDownloadItems(qrCode),
+      expiresAt: qrCode.expiresAt?.toISOString() ?? null,
+      folderId: qrCode.folderId,
+      id: qrCode.id,
+      isOneTime: qrCode.isOneTime,
+      lastScanAt: qrCode.lastScanAt?.toISOString() ?? null,
+      maxScans: qrCode.maxScans,
+      scansCount: qrCode.scansCount.toString(),
+      shortUrl: this.buildShortUrl(qrCode.slug),
+      slug: qrCode.slug,
+      status: qrCode.status,
+      title: qrCode.title,
+      type: qrCode.type,
+      updatedAt: qrCode.updatedAt.toISOString(),
+      workspaceId: qrCode.workspaceId
+    };
+  }
+
+  private toDownloadItems(qrCode: QrCodeRecord) {
+    return qrCode.assets
+      .filter((asset) => asset.kind === "QR_IMAGE")
+      .map((asset) => ({
+        bytes: asset.bytes?.toString() ?? null,
+        checksum: asset.checksum,
+        format: asset.format.toLowerCase(),
+        url:
+          asset.publicUrl ??
+          this.buildDownloadUrl(qrCode.id, asset.format.toLowerCase())
+      }));
+  }
+
+  private buildShortUrl(slug: string) {
+    const baseUrl = (
+      process.env.SHORT_DOMAIN ??
+      process.env.API_URL ??
+      "http://localhost:4000"
+    ).replace(/\/$/, "");
+    return `${baseUrl}/r/${slug}`;
+  }
+
+  private buildDownloadUrl(qrCodeId: string, format: string) {
+    const apiUrl = (process.env.API_URL ?? "http://localhost:4000").replace(
+      /\/$/,
+      ""
+    );
+    return `${apiUrl}/api/v1/qr-codes/${qrCodeId}/downloads?format=${format}`;
+  }
+
+  private normalizeDownloadFormat(format: string) {
+    const normalizedFormat = format.trim().toLowerCase();
+
+    if (normalizedFormat !== "png" && normalizedFormat !== "svg") {
+      throw new BadRequestException("Only png and svg downloads are supported.");
+    }
+
+    return normalizedFormat as ExportFormat;
+  }
+
+  private toAssetFormat(format: ExportFormat) {
+    return format === "png" ? AssetFormat.PNG : AssetFormat.SVG;
+  }
+
+  private getContentTypeForAssetFormat(format: AssetFormat) {
+    return format === AssetFormat.PNG ? "image/png" : "image/svg+xml";
+  }
+
+  private toRenderDesign(qrDesign: QrCodeRecord["design"]) {
+    if (!qrDesign) {
+      return null;
+    }
+
+    return {
+      backgroundColor: qrDesign.backgroundColor,
+      cornersInner: qrDesign.cornersInner,
+      cornersInnerColor: qrDesign.cornersInnerColor,
+      cornersOuter: qrDesign.cornersOuter,
+      cornersOuterColor: qrDesign.cornersOuterColor,
+      errorCorrection: qrDesign.errorCorrection as "L" | "M" | "Q" | "H",
+      logoAssetId: qrDesign.logoAssetId,
+      logoHideBg: qrDesign.logoHideBg,
+      pattern: qrDesign.pattern,
+      patternColor: qrDesign.patternColor,
+      quietZoneModules: qrDesign.quietZoneModules,
+      sizePx: qrDesign.sizePx
+    };
+  }
+
+  private toInputJson(value: Prisma.JsonValue) {
+    return value === null ? Prisma.JsonNull : (value as Prisma.InputJsonValue);
+  }
+
+  private async generateUniqueSlug() {
+    let slug = "";
+
+    do {
+      slug = randomBytes(4)
+        .toString("base64url")
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .slice(0, 8);
+    } while (
+      !slug ||
+      (await this.prisma.qRCode.findUnique({
+        where: { slug }
+      }))
+    );
+
+    return slug;
+  }
+}

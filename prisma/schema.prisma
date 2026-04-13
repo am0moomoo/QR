@@ -1,0 +1,546 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  FREE
+  LITE
+  PREMIUM
+  ENTERPRISE
+}
+
+enum QRCodeStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum FolderRole {
+  VIEW
+  EDIT
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum AssetKind {
+  QR_IMAGE
+  LOGO
+  UPLOADED_FILE
+  TEMPLATE_PREVIEW
+}
+
+enum AssetFormat {
+  PNG
+  SVG
+  PDF
+  JPG
+  EPS
+  WEBP
+}
+
+enum NotificationKind {
+  EMAIL
+  WEBHOOK
+  PUSH
+}
+
+enum SubscriptionStatus {
+  INCOMPLETE
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+enum ScanOutcome {
+  REDIRECTED
+  LANDED
+  BLOCKED
+  INACTIVE
+  EXPIRED
+  PASSWORD_REQUIRED
+  NOT_FOUND
+}
+
+model User {
+  id                String              @id @default(uuid()) @db.Uuid
+  email             String              @unique
+  passwordHash      String?
+  fullName          String?
+  locale            String              @default("en")
+  avatarUrl         String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  oauthAccounts     OAuthAccount[]
+  sessions          Session[]
+  passwordResetTokens PasswordResetToken[]
+  ownedWorkspaces   Workspace[]         @relation("WorkspaceOwner")
+  memberships       WorkspaceMember[]
+  folders           Folder[]
+  folderShares      FolderShare[]       @relation("InvitedUserFolderShares")
+  qrCodes           QRCode[]            @relation("QRCodeOwner")
+  notificationRules NotificationRule[]
+  subscriptions     Subscription[]
+  invoices          Invoice[]
+  apiKeys           ApiKey[]
+  webhookEndpoints  WebhookEndpoint[]
+  auditLogs         AuditLog[]          @relation("AuditActor")
+}
+
+model OAuthAccount {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  provider       String
+  providerUserId String
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+}
+
+model Session {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model PasswordResetToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  usedAt     DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Workspace {
+  id               String            @id @default(uuid()) @db.Uuid
+  ownerUserId      String            @db.Uuid
+  name             String
+  slug             String            @unique
+  plan             Plan              @default(FREE)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  owner            User              @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  members          WorkspaceMember[]
+  folders          Folder[]
+  qrCodes          QRCode[]
+  customDomains    CustomDomain[]
+  templates        QRTemplate[]
+  subscriptions    Subscription[]
+  apiKeys          ApiKey[]
+  webhookEndpoints WebhookEndpoint[]
+  auditLogs        AuditLog[]
+
+  @@index([ownerUserId])
+}
+
+model WorkspaceMember {
+  id          String        @id @default(uuid()) @db.Uuid
+  workspaceId String        @db.Uuid
+  userId      String        @db.Uuid
+  role        WorkspaceRole
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Folder {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  ownerUserId String   @db.Uuid
+  name        String
+  parentId    String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner     User      @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  parent    Folder?   @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Folder[]  @relation("FolderHierarchy")
+  qrCodes   QRCode[]
+  shares    FolderShare[]
+
+  @@index([workspaceId])
+  @@index([ownerUserId])
+  @@index([parentId])
+}
+
+model FolderShare {
+  id            String     @id @default(uuid()) @db.Uuid
+  folderId      String     @db.Uuid
+  invitedUserId String?    @db.Uuid
+  invitedEmail  String
+  role          FolderRole
+  status        String     @default("pending")
+  createdAt     DateTime   @default(now())
+  acceptedAt    DateTime?
+
+  folder      Folder @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  invitedUser User?  @relation("InvitedUserFolderShares", fields: [invitedUserId], references: [id], onDelete: Cascade)
+
+  @@index([folderId])
+  @@index([invitedEmail])
+  @@index([invitedUserId])
+}
+
+model QRCode {
+  id             String       @id @default(uuid()) @db.Uuid
+  workspaceId    String       @db.Uuid
+  ownerUserId    String       @db.Uuid
+  folderId       String?      @db.Uuid
+  title          String?
+  slug           String       @unique
+  type           String
+  status         QRCodeStatus @default(ACTIVE)
+  adsEnabled     Boolean      @default(true)
+  doNotIndex     Boolean      @default(false)
+  passwordHash   String?
+  isOneTime      Boolean      @default(false)
+  maxScans       Int?
+  scansCount     BigInt       @default(0)
+  lastScanAt     DateTime?
+  expiresAt      DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  archivedAt     DateTime?
+  deletedAt      DateTime?
+
+  workspace      Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner          User                 @relation("QRCodeOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  folder         Folder?              @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  content        QRContent?
+  design         QRDesign?
+  assets         QRAsset[]
+  scanEvents     ScanEvent[]
+  scanAggregates ScanAggregateDaily[]
+  notifications  NotificationRule[]
+  redirectRules  RedirectRule[]
+  safetyChecks   SafetyCheck[]
+  auditLogs      AuditLog[]
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, updatedAt])
+  @@index([folderId])
+  @@index([ownerUserId])
+  @@index([status])
+  @@index([lastScanAt])
+}
+
+model QRContent {
+  qrCodeId      String   @id @db.Uuid
+  payload       Json
+  targetUrl     String?
+  schemaVersion Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+}
+
+model QRDesign {
+  qrCodeId          String   @id @db.Uuid
+  sizePx            Int      @default(300)
+  pattern           String   @default("square")
+  patternColor      String   @default("#000000")
+  backgroundColor   String   @default("#ffffff")
+  cornersInner      String   @default("square")
+  cornersInnerColor String   @default("#000000")
+  cornersOuter      String   @default("square")
+  cornersOuterColor String   @default("#000000")
+  logoAssetId       String?  @db.Uuid
+  logoSizeRatio     Decimal? @db.Decimal(4, 3)
+  logoHideBg        Boolean  @default(true)
+  logoMargin        Int      @default(0)
+  frameId           String?  @db.Uuid
+  errorCorrection   String   @default("M")
+  quietZoneModules  Int      @default(4)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  qrCode QRCode  @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  logo   QRAsset? @relation("QRDesignLogo", fields: [logoAssetId], references: [id], onDelete: SetNull)
+}
+
+model QRAsset {
+  id           String      @id @default(uuid()) @db.Uuid
+  qrCodeId     String?     @db.Uuid
+  workspaceId  String?     @db.Uuid
+  kind         AssetKind
+  format       AssetFormat
+  storageKey   String      @unique
+  publicUrl    String?
+  widthPx      Int?
+  heightPx     Int?
+  bytes        BigInt?
+  checksum     String?
+  createdAt    DateTime    @default(now())
+
+  qrCode       QRCode?     @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  designLogoOf QRDesign[]  @relation("QRDesignLogo")
+
+  @@index([qrCodeId])
+  @@index([workspaceId])
+  @@index([kind])
+}
+
+model ScanEvent {
+  id             String      @id @default(uuid()) @db.Uuid
+  qrCodeId       String      @db.Uuid
+  scannedAt      DateTime
+  ip             String?
+  ipHash         String?
+  userAgent      String?
+  deviceType     String?
+  os             String?
+  browser        String?
+  language       String?
+  country        String?
+  region         String?
+  city           String?
+  networkIsp     String?
+  referrer       String?
+  utm            Json?
+  openedOk       Boolean?
+  outcome        ScanOutcome
+  redirectRuleId String?     @db.Uuid
+  requestId      String?
+
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+
+  @@index([qrCodeId, scannedAt])
+  @@index([scannedAt])
+  @@index([country])
+  @@index([outcome])
+}
+
+model ScanAggregateDaily {
+  qrCodeId         String   @db.Uuid
+  day              DateTime @db.Date
+  scans            Int
+  uniqueIps        Int
+  uniqueDevices    Int?
+  devices          Json?
+  countries        Json?
+  browsers         Json?
+  operatingSystems Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+
+  @@id([qrCodeId, day])
+}
+
+model NotificationRule {
+  id          String           @id @default(uuid()) @db.Uuid
+  qrCodeId    String           @db.Uuid
+  ownerUserId String           @db.Uuid
+  kind        NotificationKind
+  enabled     Boolean          @default(true)
+  config      Json
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  owner  User   @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  @@index([qrCodeId])
+  @@index([ownerUserId])
+}
+
+model Subscription {
+  id                   String             @id @default(uuid()) @db.Uuid
+  userId               String?            @db.Uuid
+  workspaceId          String?            @db.Uuid
+  plan                 Plan
+  status               SubscriptionStatus
+  stripeCustomerId     String?
+  stripeSubscriptionId String?            @unique
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  user         User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace    Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invoices     Invoice[]
+
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model Invoice {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String?   @db.Uuid
+  subscriptionId  String?   @db.Uuid
+  stripeInvoiceId String?   @unique
+  amountCents     Int?
+  currency        String?
+  status          String?
+  issuedAt        DateTime?
+  createdAt       DateTime  @default(now())
+
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([subscriptionId])
+}
+
+model ApiKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String?   @db.Uuid
+  workspaceId String?   @db.Uuid
+  name        String
+  keyPrefix   String    @unique
+  keyHash     String
+  scopes      Json
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  user      User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model WebhookEndpoint {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String?   @db.Uuid
+  workspaceId    String?   @db.Uuid
+  url            String
+  secretHash     String
+  events         Json
+  enabled        Boolean   @default(true)
+  lastDeliveryAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user      User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model CustomDomain {
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @db.Uuid
+  domain            String    @unique
+  status            String
+  verificationToken String
+  certificateStatus String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model RedirectRule {
+  id               String    @id @default(uuid()) @db.Uuid
+  qrCodeId         String    @db.Uuid
+  name             String
+  priority         Int       @default(100)
+  enabled          Boolean   @default(true)
+  countryCodes     Json?
+  languages        Json?
+  deviceTypes      Json?
+  operatingSystems Json?
+  startAt          DateTime?
+  endAt            DateTime?
+  targetUrl        String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+
+  @@index([qrCodeId, enabled, priority])
+}
+
+model SafetyCheck {
+  id        String   @id @default(uuid()) @db.Uuid
+  qrCodeId  String   @db.Uuid
+  status    String
+  provider  String?
+  riskScore Int?
+  summary   String?
+  details   Json?
+  checkedAt DateTime @default(now())
+
+  qrCode QRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+
+  @@index([qrCodeId, checkedAt])
+}
+
+model QRTemplate {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  name           String
+  design         Json
+  previewAssetId String?  @db.Uuid
+  createdById    String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String?  @db.Uuid
+  qrCodeId    String?  @db.Uuid
+  actorUserId String?  @db.Uuid
+  entityType  String
+  entityId    String
+  action      String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  qrCode    QRCode?    @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  actor     User?      @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([qrCodeId, createdAt])
+  @@index([actorUserId, createdAt])
+}

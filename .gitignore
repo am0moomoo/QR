@@ -1,0 +1,17 @@
+node_modules
+.pnpm-store
+.next
+dist
+coverage
+.env
+.env.local
+.env.*.local
+apps/*/.env
+apps/*/.next
+apps/*/dist
+prisma/dev.db
+.DS_Store
+storage
+.turbo
+apps/*/.turbo
+apps/*/tsconfig.tsbuildinfo

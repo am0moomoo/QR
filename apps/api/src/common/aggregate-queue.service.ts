@@ -73,22 +73,18 @@ export class AggregateQueueService implements OnModuleDestroy {
     if (existingJob) {
       const state = await existingJob.getState();
 
-      if (state === "completed") {
-        return;
-      }
-
       if (
-        options.waitForCompletion &&
         (state === "active" || state === "waiting" || state === "delayed")
       ) {
-        await existingJob.waitUntilFinished(this.queueEvents!, 30_000);
+        if (options.waitForCompletion) {
+          await existingJob.waitUntilFinished(this.queueEvents!, 30_000);
+        }
+
         return;
       }
 
-      if (state === "failed") {
+      if (state === "completed" || state === "failed") {
         await existingJob.remove();
-      } else if (!options.waitForCompletion) {
-        return;
       }
     }
 

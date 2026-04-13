@@ -73,7 +73,30 @@ jobs:
         run: pnpm db:generate
 
       - name: Build
-        run: pnpm build
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm build 2>&1 | tee .ci-build.log
+
+      - name: Summarize build failure
+        if: failure()
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          log_path = Path(".ci-build.log")
+          if not log_path.exists():
+              raise SystemExit(0)
+
+          for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]:
+              escaped = (
+                  line.replace("%", "%25")
+                  .replace("\r", "%0D")
+                  .replace("\n", "%0A")
+              )
+              print(f"::error file=.github/workflows/ci.yml,line=1::{escaped}")
+          PY
 
       - name: Lint
         run: pnpm lint

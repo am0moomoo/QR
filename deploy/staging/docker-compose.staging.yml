@@ -44,9 +44,7 @@ services:
       QUEUE_ROLE: producer
       REDIS_URL: redis://redis:6379
       STORAGE_DRIVER: ${STORAGE_DRIVER}
-    ports:
-      - "4000:4000"
-    restart: unless-stopped
+    restart: "no"
     command: ["pnpm", "db:migrate:deploy"]
 
   api:
@@ -70,6 +68,17 @@ services:
     ports:
       - "4000:4000"
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/v1/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     command: ["pnpm", "--filter", "@qr/api", "start"]
 
   worker:
@@ -99,7 +108,7 @@ services:
       dockerfile: deploy/staging/Dockerfile.web
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     env_file:
       - .env.staging
     environment:
@@ -109,6 +118,17 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/dashboard').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
 volumes:
   postgres_data:

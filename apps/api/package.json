@@ -13,6 +13,7 @@
     "test:unit": "node --test --require ts-node/register src/app.spec.ts",
     "test:integration": "node --test --test-force-exit --require ts-node/register src/integration/app.integration.spec.ts",
     "test:integration:queue-runtime": "node --test --test-force-exit --require ts-node/register src/integration/queue-runtime.spec.ts",
+    "test:integration:real-bucket": "node --test --test-force-exit --require ts-node/register src/integration/real-bucket.spec.ts",
     "test": "pnpm run test:unit && pnpm run test:integration"
   },
   "dependencies": {

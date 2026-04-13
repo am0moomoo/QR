@@ -234,3 +234,106 @@ jobs:
               + escaped
           )
           PY
+
+  verify-real-bucket:
+    if: ${{ secrets.REAL_BUCKET_S3_BUCKET != '' && secrets.REAL_BUCKET_S3_ACCESS_KEY_ID != '' && secrets.REAL_BUCKET_S3_SECRET_ACCESS_KEY != '' && secrets.REAL_BUCKET_S3_ENDPOINT != '' && vars.REAL_BUCKET_STORAGE_DRIVER != '' }}
+    needs: [verify, verify-bullmq-runtime]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/qrflow?schema=public
+      IP_HASH_SALT: ci-ip-salt
+      JWT_SECRET: ci-jwt-secret
+      NODE_ENV: test
+      QUEUE_DRIVER: bullmq
+      QUEUE_PREFIX: qrflow-real-bucket
+      QUEUE_ROLE: both
+      REDIS_KEY_PREFIX: qrflow-real-bucket
+      REDIS_URL: redis://localhost:6379
+      REQUIRE_INTEGRATION_DB: "true"
+      REQUIRE_REAL_BUCKET: "true"
+      RESET_TOKEN_TTL_MINUTES: "30"
+      SCAN_RATE_LIMIT_MAX_REQUESTS: "120"
+      SCAN_RATE_LIMIT_WINDOW_SECONDS: "60"
+      SCAN_WRITE_SYNC: "true"
+      SESSION_TTL_HOURS: "720"
+      SHORT_DOMAIN: http://localhost:4000
+      STORAGE_DRIVER: ${{ vars.REAL_BUCKET_STORAGE_DRIVER }}
+      STORAGE_SIGNED_URL_TTL_SECONDS: "300"
+      S3_BUCKET: ${{ secrets.REAL_BUCKET_S3_BUCKET }}
+      S3_ACCESS_KEY_ID: ${{ secrets.REAL_BUCKET_S3_ACCESS_KEY_ID }}
+      S3_ENDPOINT: ${{ secrets.REAL_BUCKET_S3_ENDPOINT }}
+      S3_FORCE_PATH_STYLE: ${{ vars.REAL_BUCKET_S3_FORCE_PATH_STYLE }}
+      S3_REGION: ${{ vars.REAL_BUCKET_S3_REGION }}
+      S3_SECRET_ACCESS_KEY: ${{ secrets.REAL_BUCKET_S3_SECRET_ACCESS_KEY }}
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: qrflow
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d qrflow"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.0.0 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply migrations
+        run: pnpm db:migrate:deploy
+
+      - name: Seed database
+        run: pnpm db:seed
+
+      - name: Real bucket integration smoke
+        run: pnpm --filter @qr/api test:integration:real-bucket
+
+  verify-staging-smoke:
+    if: ${{ vars.STAGING_API_URL != '' && vars.STAGING_APP_URL != '' && vars.STAGING_WORKSPACE_ID != '' }}
+    needs: [verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Run staging smoke
+        run: node scripts/staging-smoke.mjs
+        env:
+          API_URL: ${{ vars.STAGING_API_URL }}
+          APP_URL: ${{ vars.STAGING_APP_URL }}
+          STAGING_SMOKE_EXPECT_STORAGE_REDIRECT: ${{ vars.STAGING_EXPECT_STORAGE_REDIRECT }}
+          STAGING_SMOKE_RESET_TOKEN: ${{ secrets.STAGING_SMOKE_RESET_TOKEN }}
+          STAGING_SMOKE_VERIFY_RESET_PASSWORD: ${{ vars.STAGING_VERIFY_RESET_PASSWORD }}
+          STAGING_SMOKE_WORKSPACE_ID: ${{ vars.STAGING_WORKSPACE_ID }}

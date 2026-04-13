@@ -170,11 +170,267 @@ a {
   font-weight: 500;
 }
 
+code,
+.mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.break-word {
+  overflow-wrap: anywhere;
+}
+
+.stack-sm {
+  display: grid;
+  gap: 6px;
+}
+
+.stack-md {
+  display: grid;
+  gap: 12px;
+}
+
+.stack-lg {
+  display: grid;
+  gap: 16px;
+}
+
+.stack-xl {
+  display: grid;
+  gap: 24px;
+}
+
+.state-card {
+  max-width: 720px;
+  margin: 0 auto;
+  display: grid;
+  gap: 12px;
+}
+
+.dashboard-auth {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 160px);
+}
+
+.auth-card {
+  width: min(100%, 560px);
+  display: grid;
+  gap: 20px;
+}
+
+.dashboard-toggle {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dashboard-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.dashboard-sidebar {
+  position: sticky;
+  top: 24px;
+}
+
+.dashboard-nav {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-nav-link {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  color: var(--muted);
+}
+
+.dashboard-nav-link.active {
+  border-color: var(--border);
+  background: #0c1219;
+  color: var(--text);
+}
+
+.dashboard-content {
+  min-width: 0;
+}
+
+.dashboard-user-name {
+  font-size: 22px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.button.compact {
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  text-transform: capitalize;
+  border: 1px solid var(--border);
+}
+
+.status-pill.success {
+  color: #8ff0b4;
+  border-color: rgba(80, 211, 138, 0.4);
+}
+
+.status-pill.warning {
+  color: #ffd479;
+  border-color: rgba(255, 212, 121, 0.4);
+}
+
+.status-pill.danger {
+  color: #ff9a9a;
+  border-color: rgba(255, 120, 120, 0.4);
+}
+
+.status-pill.neutral {
+  color: var(--muted);
+}
+
+.callout {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: #0c1219;
+}
+
+.callout.success {
+  border-color: rgba(80, 211, 138, 0.4);
+}
+
+.callout.danger {
+  border-color: rgba(255, 120, 120, 0.4);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.compact-card {
+  padding: 16px;
+}
+
+.dashboard-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.key-value-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) 1fr;
+  gap: 10px 16px;
+}
+
+.asset-row,
+.inline-stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.dashboard-link {
+  color: var(--accent);
+}
+
+.code-block {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #0c1219;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bar-row {
+  display: grid;
+  gap: 8px;
+}
+
+.bar-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bar-track {
+  width: 100%;
+  background: #0c1219;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  height: 14px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #4cb4ff 0%, #8ff0b4 100%);
+}
+
 @media (max-width: 900px) {
   .hero {
     grid-template-columns: 1fr;
   }
   .kpis {
     grid-template-columns: repeat(2, 1fr);
+  }
+  .dashboard-layout,
+  .dashboard-split {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-sidebar {
+    position: static;
+  }
+  .key-value-grid {
+    grid-template-columns: 1fr;
   }
 }

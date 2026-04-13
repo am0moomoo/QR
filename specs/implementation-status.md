@@ -52,11 +52,19 @@ Update this file after each major Codex pass.
 - [~] rate limiting
 
 ## Analytics
-- [~] raw scan events
-- [~] daily aggregates
-- [ ] analytics dashboard
+- [x] raw scan events
+- [x] daily aggregates
+- [x] analytics dashboard
 - [ ] CSV export
 - [ ] retention jobs
+
+## Dashboard UI
+- [x] bearer-auth dashboard shell
+- [x] QR list page
+- [x] QR details page
+- [x] analytics page
+- [x] profile/settings page
+- [~] dashboard e2e smoke
 
 ## Billing
 - [ ] plans
@@ -103,3 +111,7 @@ Update this file after each major Codex pass.
 - 2026-04-13: observed `verify` step success in GitHub Actions for `Install dependencies`, `Generate Prisma client`, `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, and `API integration smoke`
 - 2026-04-13: exact end-to-end smoke flow verified green in GitHub Actions on `37ee22106e7e41f8c8ae26ab4ad656d591acf133`: `register -> login -> create QR -> render PNG/SVG -> download -> scan slug -> persist raw scan event -> update daily aggregate -> forgot/reset password -> update profile`
 - 2026-04-13: verified blocker in this session: Docker is not installed, and `localhost:5432` / `localhost:6379` are closed, so `docker compose up`, `prisma migrate deploy`, Redis verification, seed execution, and true end-to-end integration runs remain blocked on local infrastructure
+- 2026-04-13: dashboard UI now ships real bearer-authenticated pages for QR list, QR details, analytics, and profile/settings on top of `/me`, `/qr-codes`, `/qr-codes/{id}`, `/qr-codes/{id}/downloads`, and `/qr-codes/{id}/analytics`
+- 2026-04-13: dashboard UI deliberately does not expose folders/workspaces, billing polish, custom domains, bulk import, or generator/create flows yet; those remain backend-capable or backlog-only
+- 2026-04-13: local verification for the dashboard pass completed with `pnpm build`, `pnpm typecheck`, `pnpm lint`, `@qr/api test:unit`, `@qr/api test:integration` skip-mode, `node --check scripts/run-dashboard-e2e.mjs`, and `pnpm exec playwright test apps/web/e2e/dashboard.spec.ts --list`
+- 2026-04-13: dashboard e2e smoke is now wired into CI to cover list -> details -> analytics -> profile/settings against live web+api servers; current changeset still requires an observed post-push CI run before it can be claimed green

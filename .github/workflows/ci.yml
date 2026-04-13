@@ -7,13 +7,15 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
-      API_URL: http://localhost:4000
-      APP_URL: http://localhost:3000
+      API_URL: http://127.0.0.1:4000
+      APP_URL: http://127.0.0.1:3000
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/qrflow?schema=public
       IP_HASH_SALT: ci-ip-salt
       JWT_SECRET: ci-jwt-secret
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:4000/api/v1
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
       NODE_ENV: test
       REDIS_KEY_PREFIX: qrflow-ci
       REDIS_URL: redis://localhost:6379
@@ -85,3 +87,9 @@ jobs:
 
       - name: API integration smoke
         run: pnpm --filter @qr/api test:integration
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Dashboard end-to-end smoke
+        run: pnpm test:dashboard:e2e

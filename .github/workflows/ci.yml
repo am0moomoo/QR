@@ -8,6 +8,36 @@ permissions:
   contents: read
 
 jobs:
+  detect-optional-verifiers:
+    runs-on: ubuntu-latest
+    outputs:
+      run_real_bucket: ${{ steps.flags.outputs.run_real_bucket }}
+      run_staging_smoke: ${{ steps.flags.outputs.run_staging_smoke }}
+    steps:
+      - id: flags
+        shell: bash
+        env:
+          REAL_BUCKET_S3_ACCESS_KEY_ID: ${{ secrets.REAL_BUCKET_S3_ACCESS_KEY_ID }}
+          REAL_BUCKET_S3_BUCKET: ${{ secrets.REAL_BUCKET_S3_BUCKET }}
+          REAL_BUCKET_S3_ENDPOINT: ${{ secrets.REAL_BUCKET_S3_ENDPOINT }}
+          REAL_BUCKET_S3_SECRET_ACCESS_KEY: ${{ secrets.REAL_BUCKET_S3_SECRET_ACCESS_KEY }}
+          REAL_BUCKET_STORAGE_DRIVER: ${{ vars.REAL_BUCKET_STORAGE_DRIVER }}
+          STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+          STAGING_APP_URL: ${{ vars.STAGING_APP_URL }}
+          STAGING_WORKSPACE_ID: ${{ vars.STAGING_WORKSPACE_ID }}
+        run: |
+          if [[ -n "$REAL_BUCKET_S3_BUCKET" && -n "$REAL_BUCKET_S3_ACCESS_KEY_ID" && -n "$REAL_BUCKET_S3_SECRET_ACCESS_KEY" && -n "$REAL_BUCKET_S3_ENDPOINT" && -n "$REAL_BUCKET_STORAGE_DRIVER" ]]; then
+            echo "run_real_bucket=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_real_bucket=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ -n "$STAGING_API_URL" && -n "$STAGING_APP_URL" && -n "$STAGING_WORKSPACE_ID" ]]; then
+            echo "run_staging_smoke=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_staging_smoke=false" >> "$GITHUB_OUTPUT"
+          fi
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -236,8 +266,8 @@ jobs:
           PY
 
   verify-real-bucket:
-    if: ${{ secrets.REAL_BUCKET_S3_BUCKET != '' && secrets.REAL_BUCKET_S3_ACCESS_KEY_ID != '' && secrets.REAL_BUCKET_S3_SECRET_ACCESS_KEY != '' && secrets.REAL_BUCKET_S3_ENDPOINT != '' && vars.REAL_BUCKET_STORAGE_DRIVER != '' }}
-    needs: [verify, verify-bullmq-runtime]
+    if: ${{ needs.detect-optional-verifiers.outputs.run_real_bucket == 'true' }}
+    needs: [detect-optional-verifiers, verify, verify-bullmq-runtime]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -317,8 +347,8 @@ jobs:
         run: pnpm --filter @qr/api test:integration:real-bucket
 
   verify-staging-smoke:
-    if: ${{ vars.STAGING_API_URL != '' && vars.STAGING_APP_URL != '' && vars.STAGING_WORKSPACE_ID != '' }}
-    needs: [verify]
+    if: ${{ needs.detect-optional-verifiers.outputs.run_staging_smoke == 'true' }}
+    needs: [detect-optional-verifiers, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

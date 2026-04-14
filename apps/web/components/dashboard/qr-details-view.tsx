@@ -345,8 +345,12 @@ export function QrDetailsView({
             >
               Open copied QR
             </Link>
-            <Link className="button secondary compact" href={"/dashboard" as Route}>
-              Back to QR list
+            <Link
+              className="button secondary compact"
+              data-testid="qr-details-open-list-from-duplicate"
+              href={"/dashboard" as Route}
+            >
+              Open QR list
             </Link>
           </div>
         ) : null}
@@ -557,7 +561,11 @@ export function QrDetailsView({
               Use the download buttons above to export PNG or SVG files, or open analytics to review the latest scans.
             </div>
             <div className="table-actions">
-              <Link className="button secondary compact" href={"/dashboard" as Route}>
+              <Link
+                className="button secondary compact"
+                data-testid="qr-details-back-to-list"
+                href={"/dashboard" as Route}
+              >
                 Back to QR list
               </Link>
               <Link className="button secondary compact" href={`/dashboard/analytics?qr=${qrCode.id}` as Route}>

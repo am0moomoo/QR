@@ -289,8 +289,6 @@ test("dashboard product journey works through the real UI across auth, QR manage
   });
 
   await test.step("scan the QR and verify search, sort, and live dashboard state", async () => {
-    await page.getByRole("button", { name: "Refresh" }).click();
-
     await fetch(`${apiUrl}/r/${activeQr.slug}`, {
       headers: {
         "Accept-Language": "en-US,en;q=0.9",
@@ -300,6 +298,22 @@ test("dashboard product journey works through the real UI across auth, QR manage
       },
       redirect: "manual"
     });
+
+    await expect
+      .poll(async () => {
+        const analytics = await apiRequest<{
+          summary: {
+            scans: number;
+          };
+        }>(`/qr-codes/${activeQr.id}/analytics`, {
+          token: authToken
+        });
+
+        return analytics.summary.scans;
+      }, {
+        timeout: 15_000
+      })
+      .toBeGreaterThan(0);
 
     await page.getByRole("button", { name: "Refresh" }).click();
     const activeRow = page.getByTestId(`qr-row-${activeQr.id}`);
@@ -510,7 +524,7 @@ test("dashboard product journey works through the real UI across auth, QR manage
       return createdItem;
     });
 
-    await page.getByRole("link", { name: "Back to QR list" }).click();
+    await page.getByTestId("qr-details-back-to-list").click();
     await expect(page).toHaveURL(`${appUrl}/dashboard`);
     await page.getByTestId("workspace-select").selectOption(growthWorkspaceId);
     await expect(page.getByTestId(`qr-row-${duplicatedQr.id}`)).toBeVisible();

@@ -101,6 +101,12 @@ Update this file after each major Codex pass.
 - [x] release checklist
 - [x] known limitations
 
+## Deployment foundation
+- [x] runtime roles defined
+- [x] runtime env template
+- [x] runtime compose shape
+- [x] operator deployment docs
+
 ## Production readiness
 - [~] local + S3/R2 storage abstraction
 - [x] queued render processing
@@ -114,11 +120,21 @@ Update this file after each major Codex pass.
   - observed in this session for the launch-readiness pass: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm --filter @qr/api test:integration`, and `pnpm test:dashboard:e2e`
   - exact support/readiness API flow observed green in this session: `request-id middleware -> sanitized 403 API error body with matching X-Request-Id -> friendly invalid public scan 404 HTML -> friendly inactive public scan 410 HTML -> full existing auth/QR/billing/reset/profile integration smoke`
   - exact support/readiness browser flow observed green in this session: `sign in -> empty QR list -> create link QR -> refresh restores session -> QR details -> analytics -> billing -> quota block surfaced without raw internals -> profile update -> duplicate -> archive -> delete -> logout -> protected route returns to auth form`
+  - deploy-foundation prep also passed local verification in this session: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm --filter @qr/api test:integration`, `pnpm test:dashboard:e2e`, and a manual `pnpm.cmd --filter @qr/api health:worker` check against a live local worker process
   - repo-level operator docs added and checked into the tree in this session: [README.md](C:/Users/aziz0/Desktop/qr-platform-starter/README.md), [08_local_runbook.md](C:/Users/aziz0/Desktop/qr-platform-starter/specs/08_local_runbook.md), [09_env_setup_guide.md](C:/Users/aziz0/Desktop/qr-platform-starter/specs/09_env_setup_guide.md), [10_smoke_test_checklist.md](C:/Users/aziz0/Desktop/qr-platform-starter/specs/10_smoke_test_checklist.md), [11_release_checklist.md](C:/Users/aziz0/Desktop/qr-platform-starter/specs/11_release_checklist.md), and [12_known_limitations.md](C:/Users/aziz0/Desktop/qr-platform-starter/specs/12_known_limitations.md)
   - exact API billing/quota smoke observed green in deterministic test mode: `register -> login -> create QR -> render PNG/SVG -> download -> billing summary on free -> ads-off gate denied on free -> free QR limit denied at 3/3 -> checkout session creation -> signed webhook sync -> premium plan applied -> invoice synced -> premium ads-off QR allowed -> storage quota denied -> forgot/reset password -> profile update`
   - exact browser billing/product smoke observed green in deterministic test mode: `sign in -> empty QR list -> create link QR -> list/details/download/analytics -> billing page shows Free 3/3 -> free-limit create blocked -> checkout return -> signed webhook sync -> billing page shows Premium + invoice -> premium create unlocked -> profile update -> duplicate -> archive -> delete -> logout`
 - CI-verified:
-  - no newer GitHub Actions run was observed in this session for the launch-readiness pass; CI truth below still reflects the last observed green runs before these support-state and docs changes
+  - GitHub Actions run `ci #32` (`24387454663`) succeeded on commit `ba8695348054ea8c2cf376039f9d3582bcf0c6a0`
+  - passed jobs on `ci #32`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
+  - observed skipped jobs on `ci #32`: `verify-real-bucket`, `verify-staging-smoke`
+  - observed `verify` step success on `ci #32` for `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, and `Dashboard end-to-end smoke`
+  - exact current-head CI product flow observed green on `ci #32`: `register -> login -> create QR -> render PNG/SVG -> download -> scan slug -> analytics update -> billing/test-mode gating -> forgot/reset password -> profile update -> sign in -> dashboard list/details/analytics/billing/profile -> duplicate -> archive -> delete -> logout`
+  - GitHub Actions run `ci #31` (`24386920537`) succeeded on commit `3db607eaf18641f6e8c9764446fe418583bb8170`
+  - passed jobs on `ci #31`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
+  - observed skipped jobs on `ci #31`: `verify-real-bucket`, `verify-staging-smoke`
+  - observed `verify` step success on `ci #31` for `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, and `Dashboard end-to-end smoke`
+  - exact launch-readiness CI flow observed green on `ci #31`: `request-id middleware -> sanitized API failures -> friendly public scan invalid/inactive states -> register -> login -> create QR -> render PNG/SVG -> download -> billing/test-mode flow -> profile update -> dashboard browser smoke`
   - GitHub Actions run `ci #29` (`24384899553`) succeeded on commit `15560cd378054e25dc353c8d279b651f860774e4`
   - passed jobs on `ci #29`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
   - observed skipped jobs on `ci #29`: `verify-real-bucket`, `verify-staging-smoke`
@@ -150,9 +166,9 @@ Update this file after each major Codex pass.
 - real-bucket-verified:
   - none yet
   - the real-bucket smoke path now exists in `apps/api/src/integration/real-bucket.spec.ts` and the repository CI can attempt it through job `verify-real-bucket`
-  - GitHub Actions job `verify-real-bucket` was observed as `skipped` on `ci #24` because the repository did not expose the required `REAL_BUCKET_STORAGE_DRIVER` variable and live S3/R2 secrets together
+  - GitHub Actions job `verify-real-bucket` was observed as `skipped` on `ci #32`, `ci #31`, and `ci #24` because the repository did not expose the required `REAL_BUCKET_STORAGE_DRIVER` variable and live S3/R2 secrets together
 - MVP-only or not yet live-verified beyond CI:
-  - launch-readiness refinements from this pass are locally verified only so far: shared API bootstrap parity, request IDs on sanitized API failures, public invalid/inactive scan HTML states, and the new runbook/checklist docs
+  - the new deploy foundation in `deploy/runtime/` is prepared in-repo and CI-compatible, but it is not staging-verified or hosting-verified
   - remote S3/R2 object storage lifecycle, signed-download redirects, and orphan cleanup against a live bucket
   - orphan cleanup as an operator-run maintenance task instead of scheduled retention automation
   - dedicated deployed worker container/process observed in staging
@@ -163,6 +179,7 @@ Update this file after each major Codex pass.
   - no observed S3/R2 verification yet for upload/download/render lifecycle, signed URL policy, or orphan cleanup against a real bucket
   - the repo still needs real staging variables and real bucket secrets configured before GitHub Actions can move those optional jobs from `skipped` to observed execution
   - staging smoke currently requires an explicit `STAGING_SMOKE_WORKSPACE_ID` because workspace listing/management is intentionally still out of scope
+  - the new `deploy/runtime/` shape is prepared for a future deploy, but Docker-based runtime boot has not been observed from this machine because Docker is still unavailable locally
   - billing is now verified only in deterministic mock/test mode; a live Stripe test account, hosted checkout, and externally delivered webhook run are still unobserved
 
 ## Billing gaps

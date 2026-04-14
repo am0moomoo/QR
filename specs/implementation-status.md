@@ -108,7 +108,12 @@ Update this file after each major Codex pass.
   - exact API billing/quota smoke observed green in deterministic test mode: `register -> login -> create QR -> render PNG/SVG -> download -> billing summary on free -> ads-off gate denied on free -> free QR limit denied at 3/3 -> checkout session creation -> signed webhook sync -> premium plan applied -> invoice synced -> premium ads-off QR allowed -> storage quota denied -> forgot/reset password -> profile update`
   - exact browser billing/product smoke observed green in deterministic test mode: `sign in -> empty QR list -> create link QR -> list/details/download/analytics -> billing page shows Free 3/3 -> free-limit create blocked -> checkout return -> signed webhook sync -> billing page shows Premium + invoice -> premium create unlocked -> profile update -> duplicate -> archive -> delete -> logout`
 - CI-verified:
-  - current monetization/billing slice on this working copy is not yet observed in GitHub Actions; the most recent billing truth in this file is still local-only until a new run is observed on the updated branch head
+  - GitHub Actions run `ci #29` (`24384899553`) succeeded on commit `15560cd378054e25dc353c8d279b651f860774e4`
+  - passed jobs on `ci #29`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
+  - observed skipped jobs on `ci #29`: `verify-real-bucket`, `verify-staging-smoke`
+  - observed `verify` step success on `ci #29` for `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, and `Dashboard end-to-end smoke`
+  - exact API billing/quota flow observed green on `ci #29` in deterministic test mode: `register -> login -> create QR -> render PNG/SVG -> download -> billing summary on free -> ads-off gate denied on free -> free QR limit denied at 3/3 -> checkout session creation -> signed webhook sync -> premium plan applied -> invoice synced -> premium ads-off QR allowed -> storage quota denied -> forgot/reset password -> profile update`
+  - exact browser billing/product flow observed green on `ci #29` in deterministic test mode: `sign in -> empty QR list -> create link QR -> list/details/download/analytics -> billing page shows Free 3/3 -> free-limit create blocked -> checkout return -> signed webhook sync -> billing page shows Premium + invoice -> premium create unlocked -> profile update -> duplicate -> archive -> delete -> logout`
   - GitHub Actions run `ci #28` (`24362078223`) succeeded on commit `e63c9ced7978fd2a338830c2c8523d04b2b27218`
   - passed jobs on `ci #28`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
   - observed skipped jobs on `ci #28`: `verify-real-bucket`, `verify-staging-smoke`

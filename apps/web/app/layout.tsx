@@ -18,6 +18,7 @@ export default function RootLayout({
             <Link href="/" className="badge">QRFlow</Link>
             <nav className="nav-links">
               <Link href="/">Home</Link>
+              <Link href="/pricing">Pricing</Link>
               <Link href="/generator">Generator</Link>
               <Link href="/dashboard">Dashboard</Link>
             </nav>

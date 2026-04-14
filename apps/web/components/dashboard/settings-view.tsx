@@ -33,6 +33,7 @@ export function SettingsView({
 }) {
   const {
     chooseWorkspace,
+    refreshWorkspaces,
     selectedWorkspace,
     selectedWorkspaceId,
     workspaces,
@@ -139,13 +140,31 @@ export function SettingsView({
       return;
     }
 
+    const trimmedDomain = domain.trim().toLowerCase();
+
+    if (!trimmedDomain) {
+      setErrorState({
+        message: "Enter a domain before saving it.",
+        supportText: null
+      });
+      return;
+    }
+
+    if (/^https?:\/\//i.test(trimmedDomain)) {
+      setErrorState({
+        message: "Enter only the hostname, for example go.example.com.",
+        supportText: null
+      });
+      return;
+    }
+
     setBusyDomainAction("create");
     setDomainMessage(null);
     setErrorState(null);
 
     try {
       await createDashboardCustomDomain(token, selectedWorkspaceId, {
-        domain
+        domain: trimmedDomain
       });
       setDomain("go.example.com");
       setDomainMessage("Custom domain saved. Complete verification to use it in short URLs.");
@@ -156,6 +175,7 @@ export function SettingsView({
         errorRequestId: null,
         status: "ready"
       });
+      refreshWorkspaces();
     } catch (error) {
       setErrorState({
         message: toErrorMessage(error),
@@ -187,6 +207,7 @@ export function SettingsView({
         errorRequestId: null,
         status: "ready"
       });
+      refreshWorkspaces();
     } catch (error) {
       setErrorState({
         message: toErrorMessage(error),
@@ -199,6 +220,10 @@ export function SettingsView({
 
   async function handleDeleteDomain(domainId: string) {
     if (!selectedWorkspaceId) {
+      return;
+    }
+
+    if (!window.confirm("Remove this custom domain from the workspace? Existing QR codes will fall back to the default short host.")) {
       return;
     }
 
@@ -216,6 +241,7 @@ export function SettingsView({
         errorRequestId: null,
         status: "ready"
       });
+      refreshWorkspaces();
     } catch (error) {
       setErrorState({
         message: toErrorMessage(error),
@@ -246,7 +272,7 @@ export function SettingsView({
         <span className="badge">Account</span>
         <h1 className="h2">Profile & settings</h1>
         <p className="muted">
-          Keep your profile details current and manage branded routing for each workspace.
+          Keep your profile details current and manage branded routing for every workspace.
         </p>
       </section>
 
@@ -319,6 +345,8 @@ export function SettingsView({
               <div className="mono break-word">{user.avatarUrl ?? "Not set"}</div>
               <div className="muted">Locale</div>
               <div>{user.locale}</div>
+              <div className="muted">Default workspace</div>
+              <div>{selectedWorkspace?.name ?? "Not set"}</div>
             </div>
           </div>
         </div>
@@ -391,6 +419,10 @@ export function SettingsView({
             }
             title="Custom domains are unavailable"
           />
+        ) : null}
+
+        {domainsState.status === "loading" && !domainsState.data ? (
+          <div className="callout">Loading custom domains for {selectedWorkspace?.name ?? "this workspace"}.</div>
         ) : null}
 
         {domainsState.status !== "error" && (domainsState.data?.items.length ?? 0) === 0 ? (

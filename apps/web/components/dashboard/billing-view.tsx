@@ -145,6 +145,35 @@ export function BillingView({
     };
   }, [reloadNonce, selectedWorkspaceId, token]);
 
+  useEffect(() => {
+    if (!checkoutSessionId || !selectedWorkspaceId) {
+      return;
+    }
+
+    let attempt = 0;
+    let timeoutId: number | undefined;
+
+    const queueRefresh = () => {
+      if (attempt >= 5) {
+        return;
+      }
+
+      timeoutId = window.setTimeout(() => {
+        attempt += 1;
+        setReloadNonce((value) => value + 1);
+        queueRefresh();
+      }, 2_000);
+    };
+
+    queueRefresh();
+
+    return () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [checkoutSessionId, selectedWorkspaceId]);
+
   async function handlePlanSelection(plan: DashboardBillingPlan) {
     if (!selectedWorkspaceId) {
       return;
@@ -264,7 +293,7 @@ export function BillingView({
             <span className="badge">Billing</span>
             <h1 className="h2">Plan & billing</h1>
             <p className="muted">
-              Review the current plan, track usage, and move between Free, Lite, and Premium.
+              Review the current plan, track usage, and move between Free, Lite, and Premium without leaving the product.
             </p>
           </div>
           <div className="stack-sm" style={{ minWidth: 220 }}>
@@ -287,6 +316,7 @@ export function BillingView({
           </div>
           <button
             className="button secondary"
+            data-testid="billing-refresh"
             onClick={() => setReloadNonce((value) => value + 1)}
             type="button"
           >
@@ -296,7 +326,7 @@ export function BillingView({
 
         {checkoutSessionId ? (
           <div className="callout success" data-testid="billing-checkout-return">
-            Checkout returned to the dashboard. Waiting for webhook confirmation to sync the plan.
+            Checkout returned to the dashboard. We are checking for webhook confirmation and will refresh plan data automatically.
           </div>
         ) : null}
         {checkoutCanceled ? (
@@ -311,6 +341,9 @@ export function BillingView({
           <div className="callout">
             Viewing quota usage and billing history for <strong>{selectedWorkspace.name}</strong>.
           </div>
+        ) : null}
+        {summaryState.status === "loading" && summaryState.data ? (
+          <div className="callout">Refreshing plan usage and invoice history.</div>
         ) : null}
         {actionMessage ? <div className="callout success">{actionMessage}</div> : null}
         {actionError ? (

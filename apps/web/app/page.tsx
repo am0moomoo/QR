@@ -2,9 +2,9 @@ import Link from "next/link";
 
 const productHighlights = [
   "Create a QR and save it straight to the dashboard",
+  "Organize work by workspace, folder, and branded short domain",
   "Download PNG and SVG assets without leaving the product",
-  "Track live scans, status, and billing from one account",
-  "Handle plan limits and upgrades before they interrupt work"
+  "Track scans, usage limits, billing, and profile settings from one account"
 ];
 
 export default function HomePage() {
@@ -13,9 +13,9 @@ export default function HomePage() {
       <section className="hero">
         <div className="card">
           <span className="badge">QRFlow</span>
-          <h1 className="h1">Create, manage, and support QR codes from one product.</h1>
+          <h1 className="h1">Create, route, and operate QR codes from one product.</h1>
           <p className="muted">
-            Create a real link QR, download production-ready assets, review scans, and manage plan limits without leaving the workflow.
+            Create real link QR codes, download production-ready assets, review scans, and manage plan limits without leaving the workflow.
           </p>
           <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
             <Link className="button" href="/generator">
@@ -23,6 +23,9 @@ export default function HomePage() {
             </Link>
             <Link className="button secondary" href="/dashboard">
               Open dashboard
+            </Link>
+            <Link className="button secondary" href="/pricing">
+              Review plans
             </Link>
           </div>
         </div>

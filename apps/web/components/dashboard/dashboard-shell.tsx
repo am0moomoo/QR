@@ -61,14 +61,32 @@ export function DashboardShell({
       <aside className="card dashboard-sidebar">
         <div className="stack-lg">
           <div>
-            <span className="badge">QRFlow</span>
-            <h1 className="h2">Run your QR program</h1>
+            <span className="badge">QRFlow workspace</span>
+            <h1 className="h2">Run QR operations without leaving the product</h1>
             <p className="muted">
-              Create codes, review scans, manage billing, and keep your account settings in one place.
+              Create codes, organize workspaces, review scans, manage billing, and keep account settings in one place.
             </p>
           </div>
 
           <DashboardNavigation section={section} />
+
+          <div className="card compact-card">
+            <div className="muted">What this dashboard covers</div>
+            <div className="stack-sm" style={{ marginTop: 10 }}>
+              <div className="inline-stat">
+                <span>QR creation, imports, and downloads</span>
+                <strong>Live</strong>
+              </div>
+              <div className="inline-stat">
+                <span>Analytics, billing, and plan limits</span>
+                <strong>Live</strong>
+              </div>
+              <div className="inline-stat">
+                <span>Workspaces, folders, and branded routing</span>
+                <strong>Live</strong>
+              </div>
+            </div>
+          </div>
 
           <div className="card compact-card">
             <div className="muted">Signed in as</div>
@@ -76,6 +94,9 @@ export function DashboardShell({
               {authenticatedSession.user.fullName ?? authenticatedSession.user.email}
             </div>
             <div className="muted break-word">{authenticatedSession.user.email}</div>
+            <div className="muted" style={{ marginTop: 10 }}>
+              Request IDs are shown automatically on errors so support can trace issues without exposing internal details.
+            </div>
             <button
               className="button secondary compact"
               data-testid="dashboard-logout"

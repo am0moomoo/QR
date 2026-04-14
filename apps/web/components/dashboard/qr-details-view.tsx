@@ -51,6 +51,7 @@ export function QrDetailsView({
     supportText: string | null;
     upgradeRequired: boolean;
   } | null>(null);
+  const [duplicatedQrId, setDuplicatedQrId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
 
@@ -113,6 +114,7 @@ export function QrDetailsView({
 
     setBusyAction(action);
     setActionError(null);
+    setDuplicatedQrId(null);
     setActionMessage(null);
 
     try {
@@ -145,10 +147,12 @@ export function QrDetailsView({
 
     setBusyAction("duplicate");
     setActionError(null);
+    setDuplicatedQrId(null);
     setActionMessage(null);
 
     try {
-      await duplicateDashboardQrCode(token, qrId);
+      const duplicatedQr = await duplicateDashboardQrCode(token, qrId);
+      setDuplicatedQrId(duplicatedQr.id);
       setActionMessage("A copy of this QR code was added to your dashboard.");
     } catch (error) {
       setActionError({
@@ -176,6 +180,7 @@ export function QrDetailsView({
 
     setBusyAction("delete");
     setActionError(null);
+    setDuplicatedQrId(null);
     setActionMessage(null);
 
     try {
@@ -200,6 +205,7 @@ export function QrDetailsView({
 
     setBusyAction(download.format);
     setActionError(null);
+    setDuplicatedQrId(null);
 
     try {
       const file = await downloadDashboardQrAsset(token, qrId, download.format);
@@ -330,6 +336,20 @@ export function QrDetailsView({
         </div>
 
         {actionMessage ? <div className="callout success">{actionMessage}</div> : null}
+        {duplicatedQrId ? (
+          <div className="table-actions">
+            <Link
+              className="button secondary compact"
+              data-testid="qr-details-open-duplicate"
+              href={`/dashboard/qr/${duplicatedQrId}` as Route}
+            >
+              Open copied QR
+            </Link>
+            <Link className="button secondary compact" href={"/dashboard" as Route}>
+              Back to QR list
+            </Link>
+          </div>
+        ) : null}
         {actionError ? (
           <div className="callout danger">
             <div>{actionError.message}</div>
@@ -534,11 +554,16 @@ export function QrDetailsView({
           <h2 className="h2">Next steps</h2>
           <div className="stack-sm">
             <div className="callout">
-              Use the download buttons above to export PNG or SVG files for this QR code.
+              Use the download buttons above to export PNG or SVG files, or open analytics to review the latest scans.
             </div>
-            <Link className="button secondary compact" href={"/dashboard" as Route}>
-              Back to QR list
-            </Link>
+            <div className="table-actions">
+              <Link className="button secondary compact" href={"/dashboard" as Route}>
+                Back to QR list
+              </Link>
+              <Link className="button secondary compact" href={`/dashboard/analytics?qr=${qrCode.id}` as Route}>
+                Open analytics
+              </Link>
+            </div>
           </div>
         </div>
       </section>

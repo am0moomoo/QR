@@ -26,15 +26,36 @@ export function DashboardAuthPanel({
     event.preventDefault();
     setFormError(null);
 
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPassword = password.trim();
+
+    if (!normalizedEmail) {
+      setFormError("Enter your email address to continue.");
+      return;
+    }
+
+    if (!normalizedPassword) {
+      setFormError("Enter your password to continue.");
+      return;
+    }
+
+    if (mode === "register" && normalizedPassword.length < 8) {
+      setFormError("Create a password with at least 8 characters.");
+      return;
+    }
+
     startTransition(async () => {
       try {
         const response =
           mode === "login"
-            ? await loginDashboardUser({ email, password })
+            ? await loginDashboardUser({
+                email: normalizedEmail,
+                password: normalizedPassword
+              })
             : await registerDashboardUser({
-                email,
+                email: normalizedEmail,
                 fullName: normalizeFieldValue(fullName),
-                password
+                password: normalizedPassword
               });
         const session = {
           accessToken: response.accessToken,
@@ -51,23 +72,35 @@ export function DashboardAuthPanel({
   return (
     <main className="dashboard-auth">
       <section className="card auth-card">
-        <span className="badge">QRFlow</span>
-        <h1 className="h2">Sign in to your dashboard</h1>
+        <span className="badge">Account access</span>
+        <h1 className="h2">
+          {mode === "login" ? "Sign in to QRFlow" : "Create your QRFlow account"}
+        </h1>
         <p className="muted">
-          Access your QR codes, downloads, scan analytics, and profile settings.
+          {mode === "login"
+            ? "Access your QR inventory, downloads, analytics, billing, and workspace settings."
+            : "Create an account to manage QR codes, custom domains, imports, analytics, and billing from one dashboard."}
         </p>
 
         <div className="dashboard-toggle">
           <button
             className={mode === "login" ? "button" : "button secondary"}
-            onClick={() => setMode("login")}
+            data-testid="dashboard-auth-mode-login"
+            onClick={() => {
+              setFormError(null);
+              setMode("login");
+            }}
             type="button"
           >
             Sign in
           </button>
           <button
             className={mode === "register" ? "button" : "button secondary"}
-            onClick={() => setMode("register")}
+            data-testid="dashboard-auth-mode-register"
+            onClick={() => {
+              setFormError(null);
+              setMode("register");
+            }}
             type="button"
           >
             Create account
@@ -85,12 +118,14 @@ export function DashboardAuthPanel({
                 Full name
               </label>
               <input
+                autoComplete="name"
                 className="input"
                 id="dashboard-full-name"
                 onChange={(event) => setFullName(event.target.value)}
-                placeholder="Owner Example"
+                placeholder="Alex Example"
                 value={fullName}
               />
+              <div className="muted">Optional. This name appears in the dashboard sidebar.</div>
             </div>
           ) : null}
 
@@ -105,6 +140,7 @@ export function DashboardAuthPanel({
               placeholder="owner@example.com"
               type="email"
               value={email}
+              autoComplete={mode === "login" ? "email" : "username"}
             />
           </div>
 
@@ -120,12 +156,17 @@ export function DashboardAuthPanel({
               placeholder="At least 8 characters"
               type="password"
               value={password}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
             />
           </div>
 
           {errorMessage || formError ? (
             <div className="callout danger">{formError ?? errorMessage}</div>
           ) : null}
+
+          <div className="callout">
+            We keep your session on this device so you can return to the dashboard without signing in on every refresh.
+          </div>
 
           <button
             className="button"

@@ -121,6 +121,10 @@ Update this file after each major Codex pass.
 
 ## Verification truth
 - locally verified:
+  - observed in this session for the product-finish pass: `pnpm.cmd build`, `pnpm.cmd lint`, `pnpm.cmd typecheck`, `pnpm.cmd test`, `pnpm.cmd --filter @qr/api test:integration`, and `pnpm.cmd test:dashboard:e2e`
+  - exact product-finish browser flow observed green in this session: `register -> logout -> login -> create workspace -> create folder -> connect and verify custom domain -> create QR in the generator -> generator download SVG -> export JSON -> export CSV -> import CSV batch -> refresh restores session -> QR list search/sort -> QR details download PNG -> analytics -> billing free-limit block -> checkout return auto-refresh -> premium create unlocked -> duplicate from details -> archive -> delete -> profile update -> custom domain removal -> logout -> protected route returns to auth form`
+  - observed in this session that the main product surfaces now use production-like copy and connected actions instead of starter shell text: auth, generator, dashboard list, QR details, analytics, billing, profile/settings, workspaces/folders, custom domains, import/export, and the public pricing page
+  - observed in this session that dashboard and settings mutations now refresh workspace-scoped state after create/import/archive/delete/domain changes, and billing now auto-refreshes after checkout return instead of requiring a manual reload
   - observed in this session for the growth-features pass: `pnpm lint`, `pnpm --filter @qr/web build`, `pnpm --filter @qr/web typecheck`, `pnpm --filter @qr/api test:integration`, and `pnpm test:dashboard:e2e`
   - exact growth API flow observed green in this session: `register -> create workspace -> create folder -> attach custom domain -> verify custom domain -> create link QR in workspace/folder -> get QR with workspace/folder/customDomain metadata -> download PNG/SVG -> export workspace QR codes as JSON/CSV -> import QR codes from CSV -> list workspace QR codes -> resolve branded short-link host`
   - exact growth browser flow observed green in this session: `sign in -> create workspace -> create folder -> connect and verify custom domain -> create QR in generator -> dashboard list shows workspace/folder metadata -> export JSON -> import CSV -> list search/filter/sort -> details -> analytics -> billing workspace selector + free-plan limit block -> premium upgrade test-mode flow -> profile update -> duplicate -> archive -> delete -> logout`
@@ -221,7 +225,7 @@ Update this file after each major Codex pass.
 - quota coverage is currently observed for `ads off`, QR-count limits, and storage limits only; API-access quotas and retention enforcement remain incomplete
 
 ## UI shipped vs backend-capable
-- shipped in UI: sign in, session restore across refresh, logout, generator create flow, QR list, QR details, analytics, profile/settings, QR management actions (`download`, `duplicate`, `archive`, `delete`), workspace creation/selection, folder creation/filtering, custom-domain connect/verify management, bulk QR import/export, billing page with workspace-scoped plan summary/quota usage/invoice history, and upgrade/downgrade entry points in deterministic test mode
+- shipped in UI: sign in, registration, session restore across refresh, logout, generator create flow, QR list, QR details, analytics, profile/settings, pricing overview, QR management actions (`download`, `duplicate`, `archive`, `delete`), workspace creation/selection, folder creation/filtering, custom-domain connect/verify/remove management, bulk QR import/export, billing page with workspace-scoped plan summary/quota usage/invoice history, and upgrade/downgrade entry points in deterministic test mode
 - backend-capable only: Google OAuth, API keys, webhooks
 - intentionally not started in UI: notification rules, billing polish beyond current deterministic test-mode flow, and visual polish
 

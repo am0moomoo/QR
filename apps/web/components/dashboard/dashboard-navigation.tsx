@@ -7,34 +7,41 @@ export function DashboardNavigation({
 }: {
   section: DashboardSection;
 }) {
+  const listIsActive = section === "list" || section === "details";
+
   return (
     <nav className="dashboard-nav">
       <Link
         className="dashboard-nav-link"
+        data-testid="dashboard-nav-generator"
         href={"/generator" as Route}
       >
         Create QR
       </Link>
       <Link
-        className={section === "list" ? "dashboard-nav-link active" : "dashboard-nav-link"}
+        className={listIsActive ? "dashboard-nav-link active" : "dashboard-nav-link"}
+        data-testid="dashboard-nav-list"
         href="/dashboard"
       >
         QR list
       </Link>
       <Link
         className={section === "analytics" ? "dashboard-nav-link active" : "dashboard-nav-link"}
+        data-testid="dashboard-nav-analytics"
         href={"/dashboard/analytics" as Route}
       >
         Analytics
       </Link>
       <Link
         className={section === "billing" ? "dashboard-nav-link active" : "dashboard-nav-link"}
+        data-testid="dashboard-nav-billing"
         href={"/dashboard/billing" as Route}
       >
         Billing
       </Link>
       <Link
         className={section === "settings" ? "dashboard-nav-link active" : "dashboard-nav-link"}
+        data-testid="dashboard-nav-settings"
         href={"/dashboard/settings" as Route}
       >
         Profile & settings

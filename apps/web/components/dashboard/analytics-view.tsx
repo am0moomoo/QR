@@ -329,6 +329,19 @@ export function AnalyticsView({
             />
           </div>
         </div>
+
+        <div className="table-actions">
+          <Link
+            className="button secondary compact"
+            data-testid="analytics-open-details"
+            href={`/dashboard/qr/${selectedQr.id}` as Route}
+          >
+            Open QR details
+          </Link>
+          <Link className="button secondary compact" href={"/dashboard" as Route}>
+            Back to QR list
+          </Link>
+        </div>
       </section>
 
       <section className="stats-grid" data-testid="analytics-summary">
@@ -362,6 +375,10 @@ export function AnalyticsView({
           body="Loading scan totals and recent activity for the selected QR code."
           title="Loading chart data"
         />
+      ) : null}
+
+      {analyticsState.status === "loading" && analytics ? (
+        <div className="callout">Refreshing analytics for the selected QR code.</div>
       ) : null}
 
       {analyticsState.status === "error" ? (

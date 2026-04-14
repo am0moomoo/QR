@@ -71,7 +71,7 @@ export function QrListView({
   const [workspaceName, setWorkspaceName] = useState("");
   const [folderName, setFolderName] = useState("");
   const [importFormat, setImportFormat] = useState<"csv" | "json">("csv");
-  const [importData, setImportData] = useState("title,link\nSpring launch,https://example.com/spring");
+  const [importData, setImportData] = useState("");
   const [qrCodesState, setQrCodesState] =
     useState<RemoteState<DashboardQrListResponse>>(createInitialRemoteState);
   const deferredSearch = useDeferredValue(searchValue);
@@ -171,6 +171,8 @@ export function QrListView({
     try {
       await duplicateDashboardQrCode(token, qrId);
       setActionMessage("A copy of the QR code is ready in your list.");
+      refreshWorkspaces();
+      refreshFolders();
       setReloadNonce((value) => value + 1);
     } catch (error) {
       setActionError({
@@ -199,6 +201,7 @@ export function QrListView({
           ? "The QR code was archived."
           : "The QR code is active again."
       );
+      refreshWorkspaces();
       setReloadNonce((value) => value + 1);
     } catch (error) {
       setActionError({
@@ -224,6 +227,8 @@ export function QrListView({
     try {
       await deleteDashboardQrCode(token, qrId);
       setActionMessage("The QR code was deleted.");
+      refreshWorkspaces();
+      refreshFolders();
       setReloadNonce((value) => value + 1);
     } catch (error) {
       setActionError({
@@ -343,6 +348,15 @@ export function QrListView({
       return;
     }
 
+    if (!importData.trim()) {
+      setActionError({
+        message: "Paste CSV or JSON rows before starting the import.",
+        supportText: null,
+        upgradeRequired: false
+      });
+      return;
+    }
+
     setBusyActionKey("import");
     setActionError(null);
     setActionMessage(null);
@@ -353,6 +367,8 @@ export function QrListView({
         folderId: selectedFolderId,
         format: importFormat
       });
+      refreshWorkspaces();
+      refreshFolders();
       setReloadNonce((value) => value + 1);
       setActionMessage(`Imported ${imported.createdCount} QR code${imported.createdCount === 1 ? "" : "s"}.`);
     } catch (error) {
@@ -429,9 +445,9 @@ export function QrListView({
         <div className="toolbar">
           <div>
             <span className="badge">Workspace</span>
-            <h1 className="h2">Manage your QR program</h1>
+            <h1 className="h2">Run QR operations for each workspace</h1>
             <p className="muted">
-              Switch workspaces, group QR codes into folders, and import or export batches without leaving the dashboard.
+              Switch workspaces, group QR codes into folders, and handle imports or exports without leaving the dashboard.
             </p>
           </div>
           <div className="table-actions">
@@ -619,6 +635,11 @@ export function QrListView({
               className="input"
               data-testid="qr-import-data"
               onChange={(event) => setImportData(event.target.value)}
+              placeholder={
+                importFormat === "csv"
+                  ? "title,link\nSpring launch,https://example.com/spring"
+                  : '[{\"title\":\"Spring launch\",\"link\":\"https://example.com/spring\"}]'
+              }
               rows={5}
               value={importData}
             />

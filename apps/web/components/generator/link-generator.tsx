@@ -148,6 +148,44 @@ export function LinkGenerator() {
     setCreateError(null);
     setDownloadError(null);
 
+    const trimmedTitle = title.trim();
+    const trimmedLink = link.trim();
+
+    if (!trimmedTitle) {
+      setCreateError({
+        message: "Enter a title so the QR code is easy to find later.",
+        supportText: null,
+        upgradeRequired: false
+      });
+      return;
+    }
+
+    if (!trimmedLink) {
+      setCreateError({
+        message: "Enter the destination URL before creating the QR code.",
+        supportText: null,
+        upgradeRequired: false
+      });
+      return;
+    }
+
+    try {
+      const parsedUrl = new URL(trimmedLink);
+      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+        throw new Error("Only http and https destinations are supported.");
+      }
+    } catch (error) {
+      setCreateError({
+        message:
+          error instanceof Error && error.message
+            ? error.message
+            : "Enter a valid destination URL before creating the QR code.",
+        supportText: null,
+        upgradeRequired: false
+      });
+      return;
+    }
+
     startCreateTransition(async () => {
       if (!authenticatedSession) {
         setCreateError({
@@ -170,7 +208,7 @@ export function LinkGenerator() {
       try {
         const created = await createDashboardQrCode(authenticatedSession.token, {
           content: {
-            link
+            link: trimmedLink
           },
           design: {
             ...defaultDesign,
@@ -181,7 +219,7 @@ export function LinkGenerator() {
           exports: ["png", "svg"],
           folderId: selectedFolderId,
           settings: defaultSettings,
-          title: normalizeFieldValue(title),
+          title: normalizeFieldValue(trimmedTitle),
           type: "link",
           workspaceId: selectedWorkspace.id
         });
@@ -234,11 +272,11 @@ export function LinkGenerator() {
             <span className="badge">Create QR</span>
             <h1 className="h2">Create a link QR</h1>
             <p className="muted">
-              Save a real link QR to your dashboard and export it as PNG or SVG.
+              Save a real link QR to your dashboard, then export it as PNG or SVG without leaving the workflow.
             </p>
           </div>
           <Link className="button secondary" href="/dashboard">
-            Open dashboard
+            Open QR dashboard
           </Link>
         </div>
 
@@ -282,6 +320,10 @@ export function LinkGenerator() {
             </select>
             {foldersState.status === "loading" ? (
               <div className="muted">Loading folders...</div>
+            ) : foldersState.status === "error" ? (
+              <div className="muted">
+                Folder list is unavailable right now. You can still create this QR in the workspace root.
+              </div>
             ) : null}
           </div>
 
@@ -395,7 +437,7 @@ export function LinkGenerator() {
           >
             {isCreating ? "Creating..." : "Create QR"}
           </button>
-          <span className="muted">This QR code will be saved to your dashboard.</span>
+          <span className="muted">This QR code will be saved to your dashboard and immediately ready for downloads.</span>
         </div>
       </section>
 
@@ -452,9 +494,13 @@ export function LinkGenerator() {
               </button>
               <Link
                 className="button secondary compact"
+                data-testid="generator-open-details"
                 href={`/dashboard/qr/${createdQr.id}`}
               >
                 Open details
+              </Link>
+              <Link className="button secondary compact" href="/dashboard">
+                Open QR list
               </Link>
             </div>
 

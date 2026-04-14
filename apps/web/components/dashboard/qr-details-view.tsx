@@ -391,6 +391,20 @@ export function QrDetailsView({
                 </a>
               </div>
               <div>
+                <div className="muted">Workspace</div>
+                <div>{qrCode.workspace.name}</div>
+              </div>
+              <div>
+                <div className="muted">Folder</div>
+                <div>{qrCode.folder?.name ?? "Root"}</div>
+              </div>
+              <div>
+                <div className="muted">Custom domain</div>
+                <div className="mono">
+                  {qrCode.customDomain ?? "Using the default short host"}
+                </div>
+              </div>
+              <div>
                 <div className="muted">Type</div>
                 <div>{qrCode.type}</div>
               </div>

@@ -23,6 +23,7 @@ import {
   getErrorSupportText,
   toErrorMessage
 } from "./dashboard-utils";
+import { useWorkspaceSelection } from "./use-workspace-selection";
 
 export function BillingView({
   checkoutCanceled,
@@ -35,6 +36,16 @@ export function BillingView({
   token: string;
   user: DashboardUser;
 }) {
+  const {
+    chooseWorkspace,
+    selectedWorkspace,
+    selectedWorkspaceId,
+    workspaces,
+    workspacesState
+  } = useWorkspaceSelection({
+    defaultWorkspaceId: user.defaultWorkspaceId ?? null,
+    token
+  });
   const [plansState, setPlansState] =
     useState<RemoteState<DashboardBillingPlansResponse>>(createInitialRemoteState);
   const [summaryState, setSummaryState] =
@@ -84,10 +95,10 @@ export function BillingView({
   }, [reloadNonce]);
 
   useEffect(() => {
-    if (!user.defaultWorkspaceId) {
+    if (!selectedWorkspaceId) {
       setSummaryState({
         data: null,
-        errorMessage: "A default workspace is required before billing can be shown.",
+        errorMessage: "Choose a workspace before opening billing.",
         errorRequestId: null,
         status: "error"
       });
@@ -103,7 +114,7 @@ export function BillingView({
       status: "loading"
     }));
 
-    getDashboardBillingSummary(token, user.defaultWorkspaceId)
+    getDashboardBillingSummary(token, selectedWorkspaceId)
       .then((response) => {
         if (!isActive) {
           return;
@@ -132,10 +143,10 @@ export function BillingView({
     return () => {
       isActive = false;
     };
-  }, [reloadNonce, token, user.defaultWorkspaceId]);
+  }, [reloadNonce, selectedWorkspaceId, token]);
 
   async function handlePlanSelection(plan: DashboardBillingPlan) {
-    if (!user.defaultWorkspaceId) {
+    if (!selectedWorkspaceId) {
       return;
     }
 
@@ -147,7 +158,7 @@ export function BillingView({
     try {
       if (plan.code === "free") {
         const result = await cancelDashboardSubscription(token, {
-          workspaceId: user.defaultWorkspaceId
+          workspaceId: selectedWorkspaceId
         });
         setActionMessage(
           result.scheduled
@@ -170,7 +181,7 @@ export function BillingView({
         cancelUrl: `${window.location.origin}/dashboard/billing?checkout_canceled=1`,
         successUrl: `${window.location.origin}/dashboard/billing?checkout_session_id={CHECKOUT_SESSION_ID}`,
         targetPlan: plan.code,
-        workspaceId: user.defaultWorkspaceId
+        workspaceId: selectedWorkspaceId
       });
 
       window.location.assign(session.url);
@@ -186,7 +197,8 @@ export function BillingView({
 
   if (
     (plansState.status === "loading" && !plansState.data) ||
-    (summaryState.status === "loading" && !summaryState.data)
+    (summaryState.status === "loading" && !summaryState.data) ||
+    (workspacesState.status === "loading" && !workspacesState.data)
   ) {
     return (
       <LoadingState
@@ -204,6 +216,21 @@ export function BillingView({
         supportText={
           plansState.errorRequestId
             ? `Support reference: ${plansState.errorRequestId}`
+            : null
+        }
+        title="Could not load billing"
+      />
+    );
+  }
+
+  if (workspacesState.status === "error") {
+    return (
+      <ErrorState
+        body={workspacesState.errorMessage ?? "Workspaces could not be loaded."}
+        onRetry={() => window.location.reload()}
+        supportText={
+          workspacesState.errorRequestId
+            ? `Support reference: ${workspacesState.errorRequestId}`
             : null
         }
         title="Could not load billing"
@@ -240,6 +267,24 @@ export function BillingView({
               Review the current plan, track usage, and move between Free, Lite, and Premium.
             </p>
           </div>
+          <div className="stack-sm" style={{ minWidth: 220 }}>
+            <label className="muted" htmlFor="billing-workspace">
+              Workspace
+            </label>
+            <select
+              className="input"
+              data-testid="billing-workspace"
+              id="billing-workspace"
+              onChange={(event) => chooseWorkspace(event.target.value)}
+              value={selectedWorkspaceId}
+            >
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
             className="button secondary"
             onClick={() => setReloadNonce((value) => value + 1)}
@@ -260,6 +305,11 @@ export function BillingView({
         {summary.providerMode === "mock" ? (
           <div className="callout">
             Billing is running in deterministic test mode. Checkout and webhooks stay inside the local product flow.
+          </div>
+        ) : null}
+        {selectedWorkspace ? (
+          <div className="callout">
+            Viewing quota usage and billing history for <strong>{selectedWorkspace.name}</strong>.
           </div>
         ) : null}
         {actionMessage ? <div className="callout success">{actionMessage}</div> : null}

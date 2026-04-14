@@ -1119,3 +1119,220 @@ test("integration hardening: invalid session, unsafe inputs, asset repair, and w
   assert.equal(duplicateSubscriptions, 1);
   assert.equal(duplicateInvoices, 1);
 });
+
+test("integration growth: workspaces, folders, custom domains, and bulk import/export stay connected", async (t) => {
+  if (!(await ensureIntegrationReady(t))) {
+    return;
+  }
+
+  const server = app!.getHttpServer();
+  const suffix = `${Date.now()}-${Math.round(Math.random() * 10_000)}`;
+  const email = `growth-${suffix}@example.com`;
+  const password = "StrongPass123!";
+
+  const registration = await request(server)
+    .post("/api/v1/auth/register")
+    .send({
+      email,
+      fullName: "Growth Owner",
+      password
+    })
+    .expect(201);
+
+  const bearerToken = registration.body.accessToken as string;
+  const defaultWorkspace = await prisma!.workspace.findFirstOrThrow({
+    where: {
+      ownerUserId: registration.body.user.id
+    }
+  });
+
+  const createdWorkspace = await request(server)
+    .post("/api/v1/workspaces")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      name: "Growth Campaigns"
+    })
+    .expect(201);
+
+  const workspaceList = await request(server)
+    .get("/api/v1/workspaces")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(200);
+
+  assert.equal(workspaceList.body.items.length, 2);
+  assert.ok(
+    workspaceList.body.items.some(
+      (workspace: { id: string }) => workspace.id === createdWorkspace.body.id
+    )
+  );
+  assert.ok(
+    workspaceList.body.items.some(
+      (workspace: { id: string }) => workspace.id === defaultWorkspace.id
+    )
+  );
+
+  const folder = await request(server)
+    .post(`/api/v1/workspaces/${createdWorkspace.body.id}/folders`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      name: "Spring launch"
+    })
+    .expect(201);
+
+  await request(server)
+    .get(`/api/v1/workspaces/${createdWorkspace.body.id}/folders`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(200)
+    .expect(({ body }: { body: { items: Array<{ id: string }> } }) => {
+      assert.equal(body.items.length, 1);
+      assert.equal(body.items[0]?.id, folder.body.id);
+    });
+
+  const domainName = `go-${suffix}.example.com`;
+  const createdDomain = await request(server)
+    .post(`/api/v1/workspaces/${createdWorkspace.body.id}/custom-domains`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      domain: domainName
+    })
+    .expect(201);
+
+  assert.equal(createdDomain.body.status, "pending");
+  assert.equal(createdDomain.body.domain, domainName);
+  assert.match(createdDomain.body.verificationToken, /^verify_/);
+
+  const verifiedDomain = await request(server)
+    .post(
+      `/api/v1/workspaces/${createdWorkspace.body.id}/custom-domains/${createdDomain.body.id}/verify`
+    )
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      verificationToken: createdDomain.body.verificationToken
+    })
+    .expect(201);
+
+  assert.equal(verifiedDomain.body.status, "verified");
+  assert.equal(verifiedDomain.body.shortBaseUrl, `https://${domainName}`);
+
+  const growthQr = await request(server)
+    .post("/api/v1/qr-codes")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      content: {
+        link: "https://example.com/growth-custom-domain"
+      },
+      design: {
+        backgroundColor: "#ffffff",
+        cornersInner: "square",
+        cornersInnerColor: "#111111",
+        cornersOuter: "square",
+        cornersOuterColor: "#111111",
+        errorCorrection: "M",
+        logoAssetId: null,
+        logoHideBg: true,
+        pattern: "square",
+        patternColor: "#111111",
+        quietZoneModules: 4,
+        sizePx: 512
+      },
+      exports: ["png", "svg"],
+      folderId: folder.body.id,
+      settings: {
+        adsEnabled: true,
+        doNotIndex: false,
+        expiresAt: null,
+        isOneTime: false,
+        maxScans: null,
+        password: null
+      },
+      title: "Growth QR",
+      type: "link",
+      workspaceId: createdWorkspace.body.id
+    })
+    .expect(201);
+
+  assert.match(growthQr.body.shortUrl, new RegExp(`^https://${domainName}/r/`));
+  assert.equal(growthQr.body.customDomain, domainName);
+
+  await request(server)
+    .get(`/api/v1/qr-codes/${growthQr.body.id}`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(200)
+    .expect(({ body }: { body: Record<string, any> }) => {
+      assert.equal(body.folder.id, folder.body.id);
+      assert.equal(body.folder.name, "Spring launch");
+      assert.equal(body.workspace.id, createdWorkspace.body.id);
+      assert.equal(body.workspace.name, "Growth Campaigns");
+      assert.equal(body.customDomain, domainName);
+      assert.match(body.shortUrl, new RegExp(`^https://${domainName}/r/`));
+    });
+
+  await request(server)
+    .get(`/api/v1/qr-codes/${growthQr.body.id}/downloads?format=png`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .buffer(true)
+    .parse(binaryParser as unknown as (res: any, callback: (err: Error | null, body: any) => void) => void)
+    .expect(200)
+    .expect(({ body }: { body: Buffer }) => {
+      assert.ok(Buffer.isBuffer(body));
+      assert.ok(body.length > 0);
+    });
+
+  await request(server)
+    .get(`/api/v1/qr-codes/${growthQr.body.id}/downloads?format=svg`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .buffer(true)
+    .parse(textParser as unknown as (res: any, callback: (err: Error | null, body: any) => void) => void)
+    .expect(200)
+    .expect(({ body }: { body: string }) => {
+      assert.match(body, /<svg/);
+    });
+
+  await request(server)
+    .get(`/api/v1/workspaces/${createdWorkspace.body.id}/qr-codes/export?format=json`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .buffer(true)
+    .parse(textParser as unknown as (res: any, callback: (err: Error | null, body: any) => void) => void)
+    .expect(200)
+    .expect(({ body }: { body: string }) => {
+      assert.match(body, /Growth QR/);
+      assert.match(body, new RegExp(domainName.replace(/\./g, "\\.")));
+    });
+
+  await request(server)
+    .get(`/api/v1/workspaces/${createdWorkspace.body.id}/qr-codes/export?format=csv`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .buffer(true)
+    .parse(textParser as unknown as (res: any, callback: (err: Error | null, body: any) => void) => void)
+    .expect(200)
+    .expect(({ body }: { body: string }) => {
+      assert.match(body, /title,link,type,status,folder,slug,shortUrl,createdAt,updatedAt/);
+      assert.match(body, /Growth QR/);
+    });
+
+  const imported = await request(server)
+    .post(`/api/v1/workspaces/${createdWorkspace.body.id}/qr-codes/import`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      data: "title,link\nImported One,https://example.com/imported-one\nImported Two,https://example.com/imported-two",
+      folderId: folder.body.id,
+      format: "csv"
+    })
+    .expect(201);
+
+  assert.equal(imported.body.createdCount, 2);
+  assert.equal(imported.body.created.length, 2);
+
+  const growthList = await request(server)
+    .get(`/api/v1/qr-codes?workspaceId=${createdWorkspace.body.id}`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(200);
+
+  assert.equal(growthList.body.total, 3);
+
+  await request(server)
+    .get(`/r/${growthQr.body.slug}`)
+    .set("Host", domainName)
+    .expect(302)
+    .expect("Location", "https://example.com/growth-custom-domain");
+});

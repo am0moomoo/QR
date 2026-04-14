@@ -36,6 +36,11 @@ import { StorageService } from "../../common/storage.service";
 import { StructuredLoggerService } from "../../common/structured-logger.service";
 import { TelemetryService } from "../../common/telemetry.service";
 import { assertSafeRedirectTarget } from "../../common/url-safety";
+import {
+  getPreferredCustomDomain,
+  getWorkspaceBrandingVersion,
+  getWorkspaceShortBaseUrl
+} from "../../common/workspace-branding.util";
 import { parseWithSchema } from "../../common/zod.util";
 import { BillingService } from "../billing/billing.service";
 
@@ -51,6 +56,19 @@ const qrAnalyticsQuerySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional()
 });
+
+const qrCodeRecordInclude = {
+  assets: true,
+  content: true,
+  design: true,
+  folder: true,
+  redirectRules: true,
+  workspace: {
+    include: {
+      customDomains: true
+    }
+  }
+} satisfies Prisma.QRCodeInclude;
 
 type DownloadFileResponse = {
   kind: "file";
@@ -115,13 +133,7 @@ export class QrCodesService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.qRCode.findMany({
         where,
-        include: {
-          assets: true,
-          content: true,
-          design: true,
-          redirectRules: true,
-          workspace: true
-        },
+        include: qrCodeRecordInclude,
         orderBy: {
           updatedAt: "desc"
         },
@@ -213,20 +225,14 @@ export class QrCodesService {
 
         return tx.qRCode.findUniqueOrThrow({
           where: { id: created.id },
-          include: {
-            assets: true,
-            content: true,
-            design: true,
-            redirectRules: true,
-            workspace: true
-          }
+          include: qrCodeRecordInclude
         });
       });
 
       const createdQr = await this.renderQueue.render(
         qrCode.id,
         input.exports ?? ["png", "svg"],
-        qrCode.updatedAt.toISOString()
+        this.buildRenderVersionToken(qrCode)
       );
       try {
         await this.billing.enforceStorageQuota(createdQr.workspaceId);
@@ -395,13 +401,7 @@ export class QrCodesService {
 
       return tx.qRCode.findUniqueOrThrow({
         where: { id },
-        include: {
-          assets: true,
-          content: true,
-          design: true,
-          redirectRules: true,
-          workspace: true
-        }
+        include: qrCodeRecordInclude
       });
     });
 
@@ -410,7 +410,7 @@ export class QrCodesService {
         ? await this.renderQueue.render(
             updatedQr.id,
             this.assetPipeline.getExistingExportFormats(existingQr),
-            updatedQr.updatedAt.toISOString()
+            this.buildRenderVersionToken(updatedQr)
           )
         : updatedQr;
 
@@ -489,7 +489,7 @@ export class QrCodesService {
           ...this.assetPipeline.getExistingExportFormats(qrCode),
           normalizedFormat
         ])
-      ] as ExportFormat[], qrCode.updatedAt.toISOString());
+      ] as ExportFormat[], this.buildRenderVersionToken(qrCode));
       asset = refreshed.assets.find(
         (currentAsset) =>
           currentAsset.kind === "QR_IMAGE" &&
@@ -544,7 +544,7 @@ export class QrCodesService {
       refreshed = await this.renderQueue.render(
         qrCode.id,
         this.assetPipeline.getExistingExportFormats(qrCode),
-        qrCode.updatedAt.toISOString()
+        this.buildRenderVersionToken(qrCode)
       );
     } catch (error) {
       this.logger.error(
@@ -588,13 +588,7 @@ export class QrCodesService {
         archivedAt: status === "ARCHIVED" ? new Date() : null,
         status
       },
-      include: {
-        assets: true,
-        content: true,
-        design: true,
-        redirectRules: true,
-        workspace: true
-      }
+      include: qrCodeRecordInclude
     });
 
     if (status === "ACTIVE") {
@@ -667,20 +661,14 @@ export class QrCodesService {
 
       return tx.qRCode.findUniqueOrThrow({
         where: { id: created.id },
-        include: {
-          assets: true,
-          content: true,
-          design: true,
-          redirectRules: true,
-          workspace: true
-        }
+        include: qrCodeRecordInclude
       });
     });
 
     const duplicatedQr = await this.renderQueue.render(
       duplicated.id,
       this.assetPipeline.getExistingExportFormats(qrCode),
-      duplicated.updatedAt.toISOString()
+      this.buildRenderVersionToken(duplicated)
     );
     try {
       await this.billing.enforceStorageQuota(duplicatedQr.workspaceId);
@@ -732,13 +720,7 @@ export class QrCodesService {
           }
         ]
       },
-      include: {
-        assets: true,
-        content: true,
-        design: true,
-        redirectRules: true,
-        workspace: true
-      }
+      include: qrCodeRecordInclude
     });
 
     if (!qrCode) {
@@ -805,9 +787,10 @@ export class QrCodesService {
 
   private toCreateQrResponse(qrCode: QrCodeRecord) {
     return {
+      customDomain: getPreferredCustomDomain(qrCode.workspace)?.domain ?? null,
       downloads: this.toDownloadItems(qrCode),
       id: qrCode.id,
-      shortUrl: this.buildShortUrl(qrCode.slug),
+      shortUrl: this.buildShortUrl(qrCode),
       slug: qrCode.slug,
       status: qrCode.status
     };
@@ -818,22 +801,36 @@ export class QrCodesService {
       adsEnabled: qrCode.adsEnabled,
       content: qrCode.content?.payload ?? null,
       createdAt: qrCode.createdAt.toISOString(),
+      customDomain: getPreferredCustomDomain(qrCode.workspace)?.domain ?? null,
       design: qrCode.design,
       doNotIndex: qrCode.doNotIndex,
       downloads: this.toDownloadItems(qrCode),
       expiresAt: qrCode.expiresAt?.toISOString() ?? null,
       folderId: qrCode.folderId,
+      folder: qrCode.folder
+        ? {
+            id: qrCode.folder.id,
+            name: qrCode.folder.name,
+            parentId: qrCode.folder.parentId
+          }
+        : null,
       id: qrCode.id,
       isOneTime: qrCode.isOneTime,
       lastScanAt: qrCode.lastScanAt?.toISOString() ?? null,
       maxScans: qrCode.maxScans,
       scansCount: qrCode.scansCount.toString(),
-      shortUrl: this.buildShortUrl(qrCode.slug),
+      shortUrl: this.buildShortUrl(qrCode),
       slug: qrCode.slug,
       status: qrCode.status,
       title: qrCode.title,
       type: qrCode.type,
       updatedAt: qrCode.updatedAt.toISOString(),
+      workspace: {
+        id: qrCode.workspace.id,
+        name: qrCode.workspace.name,
+        plan: qrCode.workspace.plan.toLowerCase(),
+        slug: qrCode.workspace.slug
+      },
       workspaceId: qrCode.workspaceId
     };
   }
@@ -913,7 +910,7 @@ export class QrCodesService {
             format
           ])
         ] as ExportFormat[],
-        qrCode.updatedAt.toISOString()
+        this.buildRenderVersionToken(qrCode)
       );
       const repairedAsset = refreshed.assets.find(
         (currentAsset) =>
@@ -977,13 +974,14 @@ export class QrCodesService {
     );
   }
 
-  private buildShortUrl(slug: string) {
-    const baseUrl = (
-      process.env.SHORT_DOMAIN ??
-      process.env.API_URL ??
-      "http://localhost:4000"
-    ).replace(/\/$/, "");
-    return `${baseUrl}/r/${slug}`;
+  private buildShortUrl(qrCode: Pick<QrCodeRecord, "slug" | "workspace">) {
+    return `${getWorkspaceShortBaseUrl(qrCode.workspace)}/r/${qrCode.slug}`;
+  }
+
+  private buildRenderVersionToken(
+    qrCode: Pick<QrCodeRecord, "updatedAt" | "workspace">
+  ) {
+    return `${qrCode.updatedAt.toISOString()}:${getWorkspaceBrandingVersion(qrCode.workspace)}`;
   }
 
   private buildDownloadUrl(qrCodeId: string, format: string) {

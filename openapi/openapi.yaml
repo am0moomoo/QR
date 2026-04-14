@@ -2,13 +2,14 @@ openapi: 3.1.0
 info:
   title: QRFlow API
   version: 0.2.0
-  description: Implemented API surface for auth, QR CRUD, real PNG/SVG downloads, public scan routing, and QR analytics.
+  description: Implemented API surface for auth, workspaces/folders/custom domains, QR CRUD, real PNG/SVG downloads, public scan routing, billing, bulk import/export, and QR analytics.
 servers:
   - url: /api/v1
 tags:
   - name: Health
   - name: Auth
   - name: QR Codes
+  - name: Workspaces
   - name: Billing
   - name: Public
 
@@ -374,6 +375,201 @@ paths:
               schema:
                 $ref: "#/components/schemas/CreateQRCodeResponse"
 
+  /workspaces:
+    get:
+      tags: [Workspaces]
+      summary: List workspaces available to the current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Workspace list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceListResponse"
+    post:
+      tags: [Workspaces]
+      summary: Create a new workspace owned by the current user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRequest"
+      responses:
+        "201":
+          description: Workspace created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+
+  /workspaces/{workspaceId}/folders:
+    get:
+      tags: [Workspaces]
+      summary: List folders for a workspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceIdPath"
+      responses:
+        "200":
+          description: Folder list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FolderListResponse"
+    post:
+      tags: [Workspaces]
+      summary: Create a folder inside a workspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFolderRequest"
+      responses:
+        "201":
+          description: Folder created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Folder"
+
+  /workspaces/{workspaceId}/custom-domains:
+    get:
+      tags: [Workspaces]
+      summary: List custom domains attached to a workspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceIdPath"
+      responses:
+        "200":
+          description: Custom-domain list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomDomainListResponse"
+    post:
+      tags: [Workspaces]
+      summary: Attach a custom domain to a workspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCustomDomainRequest"
+      responses:
+        "201":
+          description: Custom domain created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomDomain"
+
+  /workspaces/{workspaceId}/custom-domains/{domainId}/verify:
+    post:
+      tags: [Workspaces]
+      summary: Verify a custom domain using the expected token
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceIdPath"
+        - $ref: "#/components/parameters/DomainIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyCustomDomainRequest"
+      responses:
+        "200":
+          description: Custom domain verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomDomain"
+
+  /workspaces/{workspaceId}/custom-domains/{domainId}:
+    delete:
+      tags: [Workspaces]
+      summary: Remove a custom domain from a workspace
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceIdPath"
+        - $ref: "#/components/parameters/DomainIdPath"
+      responses:
+        "200":
+          description: Domain removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required: [success]
+
+  /workspaces/{workspaceId}/qr-codes/export:
+    get:
+      tags: [Workspaces]
+      summary: Export QR codes for a workspace as JSON or CSV
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceIdPath"
+        - in: query
+          name: format
+          schema:
+            $ref: "#/components/schemas/BulkTransferFormat"
+      responses:
+        "200":
+          description: Export file
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+            text/csv:
+              schema:
+                type: string
+                format: binary
+
+  /workspaces/{workspaceId}/qr-codes/import:
+    post:
+      tags: [Workspaces]
+      summary: Import link QR codes into a workspace from CSV or JSON
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportQrCodesRequest"
+      responses:
+        "201":
+          description: QR codes imported
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkImportResponse"
+
   /public/r/{slug}:
     get:
       tags: [Public]
@@ -457,15 +653,41 @@ components:
       required: true
       schema:
         type: string
+    WorkspaceIdPath:
+      in: path
+      name: workspaceId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DomainIdPath:
+      in: path
+      name: domainId
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   schemas:
     QRCodeStatus:
       type: string
       enum: [ACTIVE, INACTIVE, ARCHIVED, DELETED]
 
+    PlanCode:
+      type: string
+      enum: [enterprise, free, lite, premium]
+
+    WorkspaceRole:
+      type: string
+      enum: [OWNER, ADMIN, EDITOR, VIEWER]
+
     ExportFormat:
       type: string
       enum: [png, svg]
+
+    BulkTransferFormat:
+      type: string
+      enum: [json, csv]
 
     User:
       type: object
@@ -562,6 +784,231 @@ components:
         accessToken:
           type: string
       required: [user, accessToken]
+
+    WorkspaceSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        plan:
+          $ref: "#/components/schemas/PlanCode"
+        slug:
+          type: string
+      required: [id, name, plan, slug]
+
+    Workspace:
+      type: object
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        customDomain:
+          type: [string, "null"]
+        customDomainCount:
+          type: integer
+        folderCount:
+          type: integer
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        plan:
+          $ref: "#/components/schemas/PlanCode"
+        qrCodeCount:
+          type: integer
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
+        slug:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - createdAt
+        - customDomain
+        - customDomainCount
+        - folderCount
+        - id
+        - name
+        - plan
+        - qrCodeCount
+        - role
+        - slug
+        - updatedAt
+
+    WorkspaceListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Workspace"
+      required: [items]
+
+    CreateWorkspaceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+      required: [name]
+      example:
+        name: "Campaign Ops"
+
+    FolderSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        parentId:
+          type: [string, "null"]
+          format: uuid
+      required: [id, name, parentId]
+
+    Folder:
+      allOf:
+        - $ref: "#/components/schemas/FolderSummary"
+        - type: object
+          properties:
+            createdAt:
+              type: string
+              format: date-time
+            qrCodeCount:
+              type: integer
+            updatedAt:
+              type: string
+              format: date-time
+            workspaceId:
+              type: string
+              format: uuid
+          required: [createdAt, qrCodeCount, updatedAt, workspaceId]
+
+    FolderListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Folder"
+      required: [items]
+
+    CreateFolderRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        parentId:
+          type: [string, "null"]
+          format: uuid
+      required: [name]
+      example:
+        name: "Spring launch"
+        parentId: null
+
+    CustomDomain:
+      type: object
+      properties:
+        certificateStatus:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+        domain:
+          type: string
+        id:
+          type: string
+          format: uuid
+        shortBaseUrl:
+          type: string
+        status:
+          type: string
+          enum: [pending, verified]
+        targetHost:
+          type: string
+        txtRecordHost:
+          type: string
+        txtRecordValue:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        verificationToken:
+          type: string
+      required:
+        - certificateStatus
+        - createdAt
+        - domain
+        - id
+        - shortBaseUrl
+        - status
+        - targetHost
+        - txtRecordHost
+        - txtRecordValue
+        - updatedAt
+        - verificationToken
+
+    CustomDomainListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomDomain"
+      required: [items]
+
+    CreateCustomDomainRequest:
+      type: object
+      properties:
+        domain:
+          type: string
+      required: [domain]
+      example:
+        domain: "go.example.com"
+
+    VerifyCustomDomainRequest:
+      type: object
+      properties:
+        verificationToken:
+          type: string
+      required: [verificationToken]
+      example:
+        verificationToken: "verify_1234567890abcdef"
+
+    ImportQrCodesRequest:
+      type: object
+      properties:
+        format:
+          $ref: "#/components/schemas/BulkTransferFormat"
+        data:
+          type: string
+        folderId:
+          type: [string, "null"]
+          format: uuid
+      required: [format, data]
+      example:
+        format: "csv"
+        data: "title,link\nSpring launch,https://example.com/spring"
+        folderId: null
+
+    BulkImportResponse:
+      type: object
+      properties:
+        created:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateQRCodeResponse"
+        createdCount:
+          type: integer
+        workspaceId:
+          type: string
+          format: uuid
+      required: [created, createdCount, workspaceId]
 
     PasswordRequest:
       type: object
@@ -721,6 +1168,8 @@ components:
           type: string
         shortUrl:
           type: string
+        customDomain:
+          type: [string, "null"]
         type:
           type: string
         status:
@@ -747,6 +1196,12 @@ components:
         design:
           type: [object, "null"]
           additionalProperties: true
+        folder:
+          oneOf:
+            - $ref: "#/components/schemas/FolderSummary"
+            - type: "null"
+        workspace:
+          $ref: "#/components/schemas/WorkspaceSummary"
         downloads:
           type: array
           items:
@@ -762,12 +1217,15 @@ components:
         - workspaceId
         - slug
         - shortUrl
+        - customDomain
         - type
         - status
         - adsEnabled
         - doNotIndex
         - isOneTime
         - scansCount
+        - folder
+        - workspace
         - downloads
         - createdAt
         - updatedAt
@@ -782,13 +1240,15 @@ components:
           type: string
         shortUrl:
           type: string
+        customDomain:
+          type: [string, "null"]
         status:
           $ref: "#/components/schemas/QRCodeStatus"
         downloads:
           type: array
           items:
             $ref: "#/components/schemas/DownloadItem"
-      required: [id, slug, shortUrl, status, downloads]
+      required: [id, slug, shortUrl, customDomain, status, downloads]
 
     ListQrCodesResponse:
       type: object

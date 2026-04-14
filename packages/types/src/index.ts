@@ -4,6 +4,9 @@ export const planNames = ["free", "lite", "premium", "enterprise"] as const;
 export const billingPlanCodes = ["free", "lite", "premium"] as const;
 export const qrStatuses = ["ACTIVE", "INACTIVE", "ARCHIVED", "DELETED"] as const;
 export const exportFormats = ["png", "svg"] as const;
+export const importFormats = ["csv", "json"] as const;
+export const customDomainStatuses = ["pending", "verified"] as const;
+export const workspaceRoles = ["OWNER", "ADMIN", "EDITOR", "VIEWER"] as const;
 export const qrTypes = [
   "link",
   "text",
@@ -29,6 +32,9 @@ export type PlanName = (typeof planNames)[number];
 export type BillingPlanCode = (typeof billingPlanCodes)[number];
 export type QrStatus = (typeof qrStatuses)[number];
 export type ExportFormat = (typeof exportFormats)[number];
+export type ImportFormat = (typeof importFormats)[number];
+export type CustomDomainStatus = (typeof customDomainStatuses)[number];
+export type WorkspaceRole = (typeof workspaceRoles)[number];
 export type QrType = (typeof qrTypes)[number];
 
 type PlanFeatureCatalogItem = {
@@ -204,6 +210,53 @@ export function isPrivateHostname(hostname: string) {
   return isPrivateIpv4(normalized) || isPrivateIpv6(normalized);
 }
 
+function normalizeHostname(value: string) {
+  return value.trim().toLowerCase().replace(/\.$/, "");
+}
+
+function isValidDomainLabel(value: string) {
+  return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(value);
+}
+
+export function normalizeCustomDomain(value: string) {
+  return normalizeHostname(value);
+}
+
+export function isSafeCustomDomain(value: string) {
+  const normalized = normalizeCustomDomain(value);
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (
+    normalized.includes("/") ||
+    normalized.includes(":") ||
+    normalized.includes("@") ||
+    normalized.startsWith(".") ||
+    normalized.endsWith(".")
+  ) {
+    return false;
+  }
+
+  if (normalized.length > 253 || !normalized.includes(".")) {
+    return false;
+  }
+
+  if (isPrivateHostname(normalized)) {
+    return false;
+  }
+
+  const labels = normalized.split(".");
+
+  if (labels.some((label) => !isValidDomainLabel(label))) {
+    return false;
+  }
+
+  const topLevelLabel = labels[labels.length - 1] ?? "";
+  return /^[a-z]{2,63}$/i.test(topLevelLabel);
+}
+
 type UrlSafetyOptions = {
   allowPrivateHosts?: boolean;
 };
@@ -265,6 +318,22 @@ const nullableHttpUrlSchema = z
   .optional()
   .transform((value) => value ?? null);
 
+const uuidOrNullSchema = z
+  .union([z.string().uuid(), z.null()])
+  .optional()
+  .transform((value) => value ?? null);
+
+const customDomainSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(255)
+  .transform((value) => normalizeCustomDomain(value))
+  .refine(
+    (value) => isSafeCustomDomain(value),
+    "Domain must be a public hostname without protocol, paths, or embedded credentials"
+  );
+
 export const registerSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8).max(128),
@@ -289,6 +358,33 @@ export const updateProfileSchema = z.object({
   avatarUrl: nullableHttpUrlSchema,
   fullName: z.union([z.string().trim().min(1).max(120), z.null()]).optional(),
   locale: z.string().trim().min(2).max(16).optional()
+});
+
+export const createWorkspaceSchema = z.object({
+  name: z.string().trim().min(2).max(80)
+});
+
+export const createFolderSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  parentId: uuidOrNullSchema
+});
+
+export const createCustomDomainSchema = z.object({
+  domain: customDomainSchema
+});
+
+export const verifyCustomDomainSchema = z.object({
+  verificationToken: z.string().trim().min(8).max(255)
+});
+
+export const bulkExportQuerySchema = z.object({
+  format: z.enum(importFormats).default("json")
+});
+
+export const bulkImportSchema = z.object({
+  data: z.string().min(1).max(500_000),
+  folderId: uuidOrNullSchema,
+  format: z.enum(importFormats)
 });
 
 export const billingSummaryQuerySchema = z.object({
@@ -433,7 +529,7 @@ const qrContentSchemaMap = {
 
 export const createQrCodeSchema = z.object({
   workspaceId: z.string().uuid(),
-  folderId: z.union([z.string().uuid(), z.null()]).optional().transform((value) => value ?? null),
+  folderId: uuidOrNullSchema,
   title: nullableStringSchema,
   type: z.enum(qrTypes),
   content: z.record(z.string(), z.unknown()),
@@ -455,6 +551,12 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
+export type CreateFolderInput = z.infer<typeof createFolderSchema>;
+export type CreateCustomDomainInput = z.infer<typeof createCustomDomainSchema>;
+export type VerifyCustomDomainInput = z.infer<typeof verifyCustomDomainSchema>;
+export type BulkExportQuery = z.infer<typeof bulkExportQuerySchema>;
+export type BulkImportInput = z.infer<typeof bulkImportSchema>;
 export type BillingSummaryQuery = z.infer<typeof billingSummaryQuerySchema>;
 export type CreateCheckoutSessionInput = z.infer<typeof createCheckoutSessionSchema>;
 export type CancelSubscriptionInput = z.infer<typeof cancelSubscriptionSchema>;

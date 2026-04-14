@@ -25,10 +25,16 @@ export type DashboardQrCode = {
   adsEnabled: boolean;
   content: Record<string, unknown> | null;
   createdAt: string;
+  customDomain: string | null;
   design: Record<string, unknown> | null;
   doNotIndex: boolean;
   downloads: DashboardDownload[];
   expiresAt: string | null;
+  folder: {
+    id: string;
+    name: string;
+    parentId: string | null;
+  } | null;
   folderId: string | null;
   id: string;
   isOneTime: boolean;
@@ -41,6 +47,12 @@ export type DashboardQrCode = {
   title: string | null;
   type: string;
   updatedAt: string;
+  workspace: {
+    id: string;
+    name: string;
+    plan: "enterprise" | "free" | "lite" | "premium";
+    slug: string;
+  };
   workspaceId: string;
 };
 
@@ -52,11 +64,68 @@ export type DashboardQrListResponse = {
 };
 
 export type DashboardCreatedQrCode = {
+  customDomain?: string | null;
   downloads: DashboardDownload[];
   id: string;
   shortUrl: string;
   slug: string;
   status: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "DELETED";
+};
+
+export type DashboardWorkspace = {
+  createdAt: string;
+  customDomain: string | null;
+  customDomainCount: number;
+  folderCount: number;
+  id: string;
+  name: string;
+  plan: "enterprise" | "free" | "lite" | "premium";
+  qrCodeCount: number;
+  role: "OWNER" | "ADMIN" | "EDITOR" | "VIEWER";
+  slug: string;
+  updatedAt: string;
+};
+
+export type DashboardWorkspaceListResponse = {
+  items: DashboardWorkspace[];
+};
+
+export type DashboardFolder = {
+  createdAt: string;
+  id: string;
+  name: string;
+  parentId: string | null;
+  qrCodeCount: number;
+  updatedAt: string;
+  workspaceId: string;
+};
+
+export type DashboardFolderListResponse = {
+  items: DashboardFolder[];
+};
+
+export type DashboardCustomDomain = {
+  certificateStatus: string | null;
+  createdAt: string;
+  domain: string;
+  id: string;
+  shortBaseUrl: string;
+  status: "pending" | "verified";
+  targetHost: string;
+  txtRecordHost: string;
+  txtRecordValue: string;
+  updatedAt: string;
+  verificationToken: string;
+};
+
+export type DashboardCustomDomainListResponse = {
+  items: DashboardCustomDomain[];
+};
+
+export type DashboardQrImportResponse = {
+  created: DashboardCreatedQrCode[];
+  createdCount: number;
+  workspaceId: string;
 };
 
 export type DashboardAnalyticsSummary = {
@@ -397,6 +466,132 @@ export async function listDashboardQrCodes(
   );
 }
 
+export async function listDashboardWorkspaces(token: string) {
+  return dashboardRequest<DashboardWorkspaceListResponse>("/workspaces", {
+    token
+  });
+}
+
+export async function createDashboardWorkspace(
+  token: string,
+  payload: {
+    name: string;
+  }
+) {
+  return dashboardRequest<DashboardWorkspace>("/workspaces", {
+    body: payload,
+    method: "POST",
+    token
+  });
+}
+
+export async function listDashboardFolders(token: string, workspaceId: string) {
+  return dashboardRequest<DashboardFolderListResponse>(
+    `/workspaces/${workspaceId}/folders`,
+    {
+      token
+    }
+  );
+}
+
+export async function createDashboardFolder(
+  token: string,
+  workspaceId: string,
+  payload: {
+    name: string;
+    parentId?: string | null;
+  }
+) {
+  return dashboardRequest<DashboardFolder>(
+    `/workspaces/${workspaceId}/folders`,
+    {
+      body: payload,
+      method: "POST",
+      token
+    }
+  );
+}
+
+export async function listDashboardCustomDomains(
+  token: string,
+  workspaceId: string
+) {
+  return dashboardRequest<DashboardCustomDomainListResponse>(
+    `/workspaces/${workspaceId}/custom-domains`,
+    {
+      token
+    }
+  );
+}
+
+export async function createDashboardCustomDomain(
+  token: string,
+  workspaceId: string,
+  payload: {
+    domain: string;
+  }
+) {
+  return dashboardRequest<DashboardCustomDomain>(
+    `/workspaces/${workspaceId}/custom-domains`,
+    {
+      body: payload,
+      method: "POST",
+      token
+    }
+  );
+}
+
+export async function verifyDashboardCustomDomain(
+  token: string,
+  workspaceId: string,
+  domainId: string,
+  payload: {
+    verificationToken: string;
+  }
+) {
+  return dashboardRequest<DashboardCustomDomain>(
+    `/workspaces/${workspaceId}/custom-domains/${domainId}/verify`,
+    {
+      body: payload,
+      method: "POST",
+      token
+    }
+  );
+}
+
+export async function deleteDashboardCustomDomain(
+  token: string,
+  workspaceId: string,
+  domainId: string
+) {
+  return dashboardRequest<{ success: boolean }>(
+    `/workspaces/${workspaceId}/custom-domains/${domainId}`,
+    {
+      method: "DELETE",
+      token
+    }
+  );
+}
+
+export async function importDashboardQrCodes(
+  token: string,
+  workspaceId: string,
+  payload: {
+    data: string;
+    folderId?: string | null;
+    format: "csv" | "json";
+  }
+) {
+  return dashboardRequest<DashboardQrImportResponse>(
+    `/workspaces/${workspaceId}/qr-codes/import`,
+    {
+      body: payload,
+      method: "POST",
+      token
+    }
+  );
+}
+
 export async function getDashboardQrCode(token: string, qrId: string) {
   return dashboardRequest<DashboardQrCode>(`/qr-codes/${qrId}`, { token });
 }
@@ -422,6 +617,7 @@ export async function createDashboardQrCode(
       sizePx: number;
     };
     exports: Array<"png" | "svg">;
+    folderId?: string | null;
     settings: {
       adsEnabled: boolean;
       doNotIndex: boolean;
@@ -581,5 +777,44 @@ export async function downloadDashboardQrAsset(
       response.headers
         .get("content-disposition")
         ?.match(/filename="([^"]+)"/)?.[1] ?? `qr-code.${format}`
+  };
+}
+
+export async function exportDashboardQrCodes(
+  token: string,
+  workspaceId: string,
+  format: "csv" | "json"
+) {
+  const response = await fetch(
+    `${getDashboardApiBaseUrl()}/workspaces/${workspaceId}/qr-codes/export?format=${format}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  if (!response.ok) {
+    const error = await parseError(response);
+    if (response.status === 401 && token) {
+      dispatchSessionExpired(error.requestId ?? null);
+    }
+
+    throw new DashboardApiError(
+      error.message,
+      response.status,
+      error.details,
+      error.requestId,
+      error.code
+    );
+  }
+
+  return {
+    blob: await response.blob(),
+    contentType: response.headers.get("content-type") ?? "",
+    fileName:
+      response.headers
+        .get("content-disposition")
+        ?.match(/filename="([^"]+)"/)?.[1] ?? `qr-codes.${format}`
   };
 }

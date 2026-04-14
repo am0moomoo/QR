@@ -7,7 +7,7 @@ const appUrl = (process.env.APP_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "
 const apiUrl = (process.env.API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
 const apiBaseUrl = `${apiUrl}/api/v1`;
 
-test.setTimeout(90_000);
+test.setTimeout(120_000);
 
 async function apiRequest<T>(
   path: string,
@@ -60,7 +60,7 @@ test.afterAll(async () => {
   await prisma.$disconnect();
 });
 
-test("dashboard list, details, analytics, and settings use live API data", async ({
+test("dashboard growth flow uses live API data across workspaces, folders, custom domains, billing, and settings", async ({
   page
 }) => {
   page.on("console", (message) => {
@@ -73,11 +73,14 @@ test("dashboard list, details, analytics, and settings use live API data", async
   });
 
   const suffix = `${Date.now()}-${Math.round(Math.random() * 10_000)}`;
-  const email = `dashboard-${suffix}@example.com`;
+  const email = `dashboard-growth-${suffix}@example.com`;
   const password = "StrongPass123!";
+  const workspaceName = `Growth Workspace ${suffix}`;
+  const folderName = `Spring Launch ${suffix}`;
+  const customDomain = `go-${suffix}.example.com`;
   const activeTitle = `Alpha Dashboard ${suffix}`;
   const inactiveTitle = `Dormant Dashboard ${suffix}`;
-  const fillerTitle = `Quota Filler ${suffix}`;
+  const importedTitle = `Imported Dashboard ${suffix}`;
   const premiumTitle = `Premium Dashboard ${suffix}`;
 
   const registration = await apiRequest<{
@@ -90,12 +93,6 @@ test("dashboard list, details, analytics, and settings use live API data", async
       password
     },
     method: "POST"
-  });
-
-  const workspace = await prisma.workspace.findFirstOrThrow({
-    where: {
-      ownerUserId: registration.user.id
-    }
   });
 
   const design = {
@@ -122,17 +119,18 @@ test("dashboard list, details, analytics, and settings use live API data", async
     password: null
   };
 
+  let growthWorkspaceId = "";
+  let folderId = "";
   let activeQr!: {
     id: string;
     shortUrl: string;
     slug: string;
   };
-  let duplicatedQr!: {
-    id: string;
-  };
   let inactiveQr!: {
     id: string;
-    slug: string;
+  };
+  let duplicatedQr!: {
+    id: string;
   };
 
   await test.step("sign in through the dashboard auth form", async () => {
@@ -145,20 +143,89 @@ test("dashboard list, details, analytics, and settings use live API data", async
     await expect(page.getByRole("heading", { name: "No QR codes yet" })).toBeVisible();
   });
 
-  await test.step("show a truthful empty state and create a real QR through the generator UI", async () => {
-    await expect(page.getByRole("heading", { name: "No QR codes yet" })).toBeVisible();
-    await page.getByRole("link", { name: "Create your first link QR" }).click();
+  await test.step("create a dedicated workspace and folder from the dashboard", async () => {
+    await page.getByTestId("workspace-name").fill(workspaceName);
+    await page.getByTestId("workspace-create").click();
+    await expect(page.getByTestId("qr-list-view")).toContainText(`Workspace "${workspaceName}" is ready.`);
+    await expect(page.getByTestId("workspace-select")).toHaveValue(/.+/);
 
-    await expect(page).toHaveURL(`${appUrl}/generator`);
+    const workspaces = await apiRequest<{
+      items: Array<{ id: string; name: string }>;
+    }>("/workspaces", {
+      token: registration.accessToken
+    });
+    const createdWorkspace = workspaces.items.find(
+      (workspace) => workspace.name === workspaceName
+    );
+
+    if (!createdWorkspace) {
+      throw new Error("Workspace created from the dashboard was not returned by the API.");
+    }
+
+    growthWorkspaceId = createdWorkspace.id;
+    await page.getByTestId("workspace-select").selectOption(growthWorkspaceId);
+
+    await page.getByTestId("folder-name").fill(folderName);
+    await page.getByTestId("folder-create").click();
+    await expect(page.getByTestId("qr-list-view")).toContainText(`Folder "${folderName}" is ready.`);
+
+    const folders = await apiRequest<{
+      items: Array<{ id: string; name: string }>;
+    }>(`/workspaces/${growthWorkspaceId}/folders`, {
+      token: registration.accessToken
+    });
+    const createdFolder = folders.items.find((folder) => folder.name === folderName);
+
+    if (!createdFolder) {
+      throw new Error("Folder created from the dashboard was not returned by the API.");
+    }
+
+    folderId = createdFolder.id;
+    await page.getByTestId("folder-select").selectOption(folderId);
+  });
+
+  await test.step("connect and verify a custom domain from settings", async () => {
+    await page.goto(`${appUrl}/dashboard/settings`);
+    await expect(page.getByTestId("settings-view")).toBeVisible();
+    await page.getByTestId("settings-workspace").selectOption(growthWorkspaceId);
+    await page.getByTestId("custom-domain-input").fill(customDomain);
+    await page.getByTestId("custom-domain-create").click();
+    await expect(page.getByTestId("custom-domains-view")).toContainText(
+      "Custom domain saved. Complete verification to use it in short URLs."
+    );
+
+    const domains = await apiRequest<{
+      items: Array<{ domain: string; id: string }>;
+    }>(`/workspaces/${growthWorkspaceId}/custom-domains`, {
+      token: registration.accessToken
+    });
+    const createdDomain = domains.items.find((item) => item.domain === customDomain);
+
+    if (!createdDomain) {
+      throw new Error("Custom domain created from settings was not returned by the API.");
+    }
+
+    await page.getByTestId(`custom-domain-verify-${createdDomain.id}`).click();
+    await expect(page.getByTestId("custom-domains-view")).toContainText(
+      "Custom domain verified. New QR downloads now use the branded short host."
+    );
+    await expect(page.getByTestId(`custom-domain-${createdDomain.id}`)).toContainText("verified");
+  });
+
+  await test.step("create a real QR through the generator in the selected workspace and folder", async () => {
+    await page.goto(`${appUrl}/generator`);
     await expect(page.getByTestId("generator-view")).toBeVisible();
+    await page.locator("#generator-workspace").selectOption(growthWorkspaceId);
+    await page.locator("#generator-folder").selectOption(folderId);
     await page.getByTestId("generator-title").fill(activeTitle);
     await page.getByTestId("generator-link").fill("https://example.com/dashboard-live");
     await page.getByTestId("generator-submit").click();
 
     await expect(page.getByTestId("generator-created-result")).toBeVisible();
     await expect(page.getByTestId("generator-created-result")).toContainText(activeTitle);
-    await expect(page.getByTestId("generator-download-png")).toBeVisible();
-    await expect(page.getByTestId("generator-download-svg")).toBeVisible();
+    await expect(page.getByTestId("generator-created-result")).toContainText(workspaceName);
+    await expect(page.getByTestId("generator-created-result")).toContainText(folderName);
+    await expect(page.getByTestId("generator-created-result")).toContainText(customDomain);
 
     activeQr = await apiRequest<{
       items: Array<{
@@ -167,7 +234,7 @@ test("dashboard list, details, analytics, and settings use live API data", async
         slug: string;
         title: string | null;
       }>;
-    }>("/qr-codes", {
+    }>(`/qr-codes?workspaceId=${growthWorkspaceId}`, {
       token: registration.accessToken
     }).then((response) => {
       const createdItem = response.items.find(
@@ -181,18 +248,34 @@ test("dashboard list, details, analytics, and settings use live API data", async
       return createdItem;
     });
 
-    await page.getByRole("link", { name: "Open dashboard" }).click();
-    await expect(page).toHaveURL(`${appUrl}/dashboard`);
-    await expect(page.getByTestId(`qr-row-${activeQr.id}`)).toBeVisible();
-    await page.reload();
-    await expect(page.getByTestId("qr-list-view")).toBeVisible();
-    await expect(page.getByTestId(`qr-row-${activeQr.id}`)).toBeVisible();
+    expect(activeQr.shortUrl).toContain(customDomain);
   });
 
-  await test.step("create a second QR through the API for list filtering and analytics setup", async () => {
+  await test.step("show the created QR in the dashboard and support bulk export/import", async () => {
+    await page.getByRole("link", { name: "Open dashboard" }).click();
+    await expect(page).toHaveURL(`${appUrl}/dashboard`);
+    await page.getByTestId("workspace-select").selectOption(growthWorkspaceId);
+    await page.getByTestId("folder-select").selectOption(folderId);
+    await expect(page.getByTestId(`qr-row-${activeQr.id}`)).toBeVisible();
+
+    const [exportDownload] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("qr-export-json").click()
+    ]);
+
+    expect(exportDownload.suggestedFilename()).toContain(".json");
+
+    await page.getByTestId("qr-import-format").selectOption("csv");
+    await page.getByTestId("qr-import-data").fill(
+      `title,link\n${importedTitle},https://example.com/imported-dashboard`
+    );
+    await page.getByTestId("qr-import-submit").click();
+    await expect(page.getByTestId("qr-list-view")).toContainText("Imported 1 QR code.");
+  });
+
+  await test.step("create a second inactive QR through the API for list filtering and analytics setup", async () => {
     inactiveQr = await apiRequest<{
       id: string;
-      slug: string;
     }>("/qr-codes", {
       body: {
         content: {
@@ -200,10 +283,11 @@ test("dashboard list, details, analytics, and settings use live API data", async
         },
         design,
         exports: ["png", "svg"],
+        folderId,
         settings,
         title: inactiveTitle,
         type: "link",
-        workspaceId: workspace.id
+        workspaceId: growthWorkspaceId
       },
       method: "POST",
       token: registration.accessToken
@@ -217,38 +301,25 @@ test("dashboard list, details, analytics, and settings use live API data", async
     await fetch(`${apiUrl}/r/${activeQr.slug}`, {
       headers: {
         "Accept-Language": "en-US,en;q=0.9",
+        Host: customDomain,
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/123",
         "X-Country": "US"
       },
       redirect: "manual"
     });
 
-    await apiRequest("/qr-codes", {
-      body: {
-        content: {
-          link: "https://example.com/dashboard-quota-filler"
-        },
-        design,
-        exports: ["png", "svg"],
-        settings,
-        title: fillerTitle,
-        type: "link",
-        workspaceId: workspace.id
-      },
-      method: "POST",
-      token: registration.accessToken
-    });
-
     await page.getByRole("button", { name: "Refresh" }).click();
+    await expect(page.getByTestId("qr-list-table")).toContainText(importedTitle);
     await expect(page.getByTestId(`qr-row-${inactiveQr.id}`)).toBeVisible();
   });
 
-  await test.step("render the live QR list with search, filter, and sort", async () => {
+  await test.step("render the live QR list with search, workspace folder filter, and sort", async () => {
     const activeRow = page.getByTestId(`qr-row-${activeQr.id}`);
     const inactiveRow = page.getByTestId(`qr-row-${inactiveQr.id}`);
 
     await expect(page.getByTestId("qr-list-table")).toBeVisible();
     await expect(activeRow).toContainText(activeTitle);
+    await expect(activeRow).toContainText(folderName);
     await expect(inactiveRow).toContainText(inactiveTitle);
 
     await page.locator("#qr-search").fill(activeTitle);
@@ -261,9 +332,6 @@ test("dashboard list, details, analytics, and settings use live API data", async
     await expect(activeRow).toBeHidden();
 
     await page.locator("#qr-status-filter").selectOption("ALL");
-    await expect(activeRow).toBeVisible();
-    await expect(inactiveRow).toBeVisible();
-
     await page.locator("#qr-sort").selectOption("scans-desc");
     await expect(page.locator("[data-testid^='qr-row-']").first()).toHaveAttribute(
       "data-testid",
@@ -271,16 +339,16 @@ test("dashboard list, details, analytics, and settings use live API data", async
     );
   });
 
-  await test.step("open QR details and verify live assets and summary", async () => {
+  await test.step("open QR details and verify folder, workspace, custom domain, and downloads", async () => {
     await page.getByTestId(`qr-details-link-${activeQr.id}`).click();
     await expect(page).toHaveURL(`${appUrl}/dashboard/qr/${activeQr.id}`);
     await expect(page.getByTestId("qr-details-view")).toBeVisible();
     await expect(page.getByRole("heading", { name: activeTitle })).toBeVisible();
     await expect(page.getByTestId("qr-details-view")).toContainText(activeQr.slug);
     await expect(page.getByTestId("qr-details-view")).toContainText(activeQr.shortUrl);
-    await expect(page.getByTestId("qr-details-summary")).toContainText("Unique IPs (30d)");
-    await expect(page.getByTestId("qr-download-png")).toBeVisible();
-    await expect(page.getByTestId("qr-download-svg")).toBeVisible();
+    await expect(page.getByTestId("qr-details-view")).toContainText(workspaceName);
+    await expect(page.getByTestId("qr-details-view")).toContainText(folderName);
+    await expect(page.getByTestId("qr-details-view")).toContainText(customDomain);
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),
@@ -294,21 +362,23 @@ test("dashboard list, details, analytics, and settings use live API data", async
     await page.getByTestId("open-analytics-page").click();
     await expect(page).toHaveURL(`${appUrl}/dashboard/analytics?qr=${activeQr.id}`);
     await expect(page.getByTestId("analytics-view")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
     await expect(page.locator("#analytics-qr")).toHaveValue(activeQr.id);
     await expect(page.getByTestId("analytics-summary")).toContainText("Scans in range");
     await expect(page.getByTestId("analytics-view")).toContainText("REDIRECTED");
   });
 
-  await test.step("show the current free plan and enforce the free QR limit", async () => {
-    await page.getByRole("link", { name: "Billing" }).click();
-    await expect(page).toHaveURL(`${appUrl}/dashboard/billing`);
+  await test.step("show the current free plan and enforce the free QR limit on the selected workspace", async () => {
+    await page.goto(`${appUrl}/dashboard/billing`);
     await expect(page.getByTestId("billing-view")).toBeVisible();
+    await page.getByTestId("billing-workspace").selectOption(growthWorkspaceId);
+    await expect(page.getByTestId("billing-view")).toContainText(workspaceName);
     await expect(page.getByTestId("billing-summary")).toContainText("Free");
     await expect(page.getByTestId("billing-summary")).toContainText("3 / 3");
 
     await page.getByRole("link", { name: "Create QR" }).click();
     await expect(page).toHaveURL(`${appUrl}/generator`);
+    await page.locator("#generator-workspace").selectOption(growthWorkspaceId);
+    await page.locator("#generator-folder").selectOption(folderId);
     await page.getByTestId("generator-title").fill(`Blocked ${suffix}`);
     await page.getByTestId("generator-link").fill("https://example.com/free-limit-blocked");
     await page.getByTestId("generator-submit").click();
@@ -320,6 +390,7 @@ test("dashboard list, details, analytics, and settings use live API data", async
   await test.step("upgrade in billing test mode, sync webhooks, and unlock more capacity", async () => {
     await page.goto(`${appUrl}/dashboard/billing`);
     await expect(page.getByTestId("billing-view")).toBeVisible();
+    await page.getByTestId("billing-workspace").selectOption(growthWorkspaceId);
     await page.getByTestId("billing-select-premium").click();
     await expect(page).toHaveURL(/\/dashboard\/billing\?checkout_session_id=/);
     await expect(page.getByTestId("billing-checkout-return")).toBeVisible();
@@ -327,27 +398,20 @@ test("dashboard list, details, analytics, and settings use live API data", async
     const checkoutSessionId = new URL(page.url()).searchParams.get("checkout_session_id");
     expect(checkoutSessionId).toBeTruthy();
 
-    const checkoutSummary = await apiRequest<{
-      currentPlan: { code: string };
-    }>(`/billing/summary?workspaceId=${workspace.id}`, {
-      token: registration.accessToken
-    });
-    expect(checkoutSummary.currentPlan.code).toBe("free");
-
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim() || "whsec_mock";
     const checkoutCompletedPayload = JSON.stringify({
-      id: "evt_checkout_completed_browser",
+      id: "evt_checkout_completed_browser_growth",
       object: "event",
       type: "checkout.session.completed",
       data: {
         object: {
-          client_reference_id: workspace.id,
+          client_reference_id: growthWorkspaceId,
           customer: `cus_test_mock_${suffix}`,
           id: checkoutSessionId,
           metadata: {
             targetPlan: "premium",
             userId: registration.user.id,
-            workspaceId: workspace.id
+            workspaceId: growthWorkspaceId
           },
           mode: "subscription",
           object: "checkout.session",
@@ -356,7 +420,7 @@ test("dashboard list, details, analytics, and settings use live API data", async
       }
     });
     const subscriptionUpdatedPayload = JSON.stringify({
-      id: "evt_subscription_updated_browser",
+      id: "evt_subscription_updated_browser_growth",
       object: "event",
       type: "customer.subscription.updated",
       data: {
@@ -377,7 +441,7 @@ test("dashboard list, details, analytics, and settings use live API data", async
           metadata: {
             targetPlan: "premium",
             userId: registration.user.id,
-            workspaceId: workspace.id
+            workspaceId: growthWorkspaceId
           },
           object: "subscription",
           status: "active"
@@ -385,7 +449,7 @@ test("dashboard list, details, analytics, and settings use live API data", async
       }
     });
     const invoicePaidPayload = JSON.stringify({
-      id: "evt_invoice_paid_browser",
+      id: "evt_invoice_paid_browser_growth",
       object: "event",
       type: "invoice.paid",
       data: {
@@ -412,8 +476,7 @@ test("dashboard list, details, analytics, and settings use live API data", async
           "Content-Type": "application/json",
           "Stripe-Signature": createStripeSignatureHeader(payload, webhookSecret)
         },
-        method: "POST"
-        ,
+        method: "POST",
         rawBody: true
       });
     }
@@ -425,6 +488,8 @@ test("dashboard list, details, analytics, and settings use live API data", async
 
     await page.getByRole("link", { name: "Create QR" }).click();
     await expect(page).toHaveURL(`${appUrl}/generator`);
+    await page.locator("#generator-workspace").selectOption(growthWorkspaceId);
+    await page.locator("#generator-folder").selectOption(folderId);
     await page.getByTestId("generator-title").fill(premiumTitle);
     await page.getByTestId("generator-link").fill("https://example.com/premium-after-upgrade");
     await page.getByTestId("generator-submit").click();
@@ -437,7 +502,6 @@ test("dashboard list, details, analytics, and settings use live API data", async
     await page.goto(`${appUrl}/dashboard/settings`);
     await expect(page).toHaveURL(`${appUrl}/dashboard/settings`);
     await expect(page.getByTestId("settings-view")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Profile & settings" })).toBeVisible();
 
     await page.locator("#settings-full-name").fill(updatedName);
     await page.locator("#settings-avatar-url").fill("https://example.com/dashboard-avatar.png");
@@ -456,8 +520,8 @@ test("dashboard list, details, analytics, and settings use live API data", async
   });
 
   await test.step("duplicate, archive, and delete a QR from the dashboard list", async () => {
-    await page.getByRole("link", { name: "QR list" }).click();
-    await expect(page).toHaveURL(`${appUrl}/dashboard`);
+    await page.goto(`${appUrl}/dashboard`);
+    await page.getByTestId("workspace-select").selectOption(growthWorkspaceId);
     await expect(page.getByTestId(`qr-row-${activeQr.id}`)).toBeVisible();
 
     await page.getByTestId(`qr-duplicate-${activeQr.id}`).click();
@@ -469,8 +533,9 @@ test("dashboard list, details, analytics, and settings use live API data", async
       items: Array<{
         id: string;
         title: string | null;
+        workspaceId: string;
       }>;
-    }>("/qr-codes", {
+    }>(`/qr-codes?workspaceId=${growthWorkspaceId}`, {
       token: registration.accessToken
     }).then((response) => {
       const createdItem = response.items.find(

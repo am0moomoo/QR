@@ -5,6 +5,7 @@ import { HealthController } from "./modules/health/health.controller";
 import { QrCodesController } from "./modules/qr-codes/qr-codes.controller";
 import { ScanController } from "./modules/scan/scan.controller";
 import { BillingController } from "./modules/billing/billing.controller";
+import { WorkspacesController } from "./modules/workspaces/workspaces.controller";
 import { BillingService } from "./modules/billing/billing.service";
 import { AuthController } from "./modules/auth/auth.controller";
 import { PrismaService } from "./common/prisma.service";
@@ -25,6 +26,7 @@ import { AnalyticsService } from "./common/analytics.service";
 import { AuthService } from "./modules/auth/auth.service";
 import { QrCodesService } from "./modules/qr-codes/qr-codes.service";
 import { ScanService } from "./modules/scan/scan.service";
+import { WorkspacesService } from "./modules/workspaces/workspaces.service";
 
 @Module({
   imports: [
@@ -37,7 +39,8 @@ import { ScanService } from "./modules/scan/scan.service";
     HealthController,
     QrCodesController,
     ScanController,
-    BillingController
+    BillingController,
+    WorkspacesController
   ],
   providers: [
     StructuredLoggerService,
@@ -59,7 +62,8 @@ import { ScanService } from "./modules/scan/scan.service";
     BillingService,
     AuthService,
     QrCodesService,
-    ScanService
+    ScanService,
+    WorkspacesService
   ]
 })
 export class AppModule {}

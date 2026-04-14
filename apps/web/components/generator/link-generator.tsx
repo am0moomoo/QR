@@ -11,6 +11,7 @@ import {
 import { DashboardAuthPanel } from "../dashboard/dashboard-auth-panel";
 import { EmptyState, ErrorState, LoadingState } from "../dashboard/dashboard-state";
 import { useDashboardSession } from "../dashboard/use-dashboard-session";
+import { useWorkspaceSelection } from "../dashboard/use-workspace-selection";
 import {
   getErrorSupportText,
   getQrLinkTarget,
@@ -67,6 +68,22 @@ export function LinkGenerator() {
   } | null>(null);
   const [busyDownload, setBusyDownload] = useState<"png" | "svg" | null>(null);
   const [isCreating, startCreateTransition] = useTransition();
+  const authenticatedSession =
+    sessionState.status === "ready" ? sessionState : null;
+  const {
+    chooseFolder,
+    chooseWorkspace,
+    folders,
+    foldersState,
+    selectedFolderId,
+    selectedWorkspace,
+    selectedWorkspaceId,
+    workspaces,
+    workspacesState
+  } = useWorkspaceSelection({
+    defaultWorkspaceId: authenticatedSession?.user.defaultWorkspaceId ?? null,
+    token: authenticatedSession?.token ?? ""
+  });
 
   if (sessionState.status === "booting") {
     return (
@@ -86,13 +103,42 @@ export function LinkGenerator() {
     );
   }
 
-  const authenticatedSession =
-    sessionState.status === "ready" ? sessionState : null;
-
   if (!authenticatedSession?.user.defaultWorkspaceId) {
     return (
       <ErrorState
         body="A default workspace is required before this account can create QR codes."
+        title="Workspace is unavailable"
+      />
+    );
+  }
+
+  if (workspacesState.status === "loading" && !workspacesState.data) {
+    return (
+      <LoadingState
+        body="Loading your workspaces so this QR can be created in the right place."
+        title="Loading generator"
+      />
+    );
+  }
+
+  if (workspacesState.status === "error") {
+    return (
+      <ErrorState
+        body={workspacesState.errorMessage ?? "We couldn't load your workspaces."}
+        supportText={
+          workspacesState.errorRequestId
+            ? `Support reference: ${workspacesState.errorRequestId}`
+            : null
+        }
+        title="Workspace setup is unavailable"
+      />
+    );
+  }
+
+  if (!selectedWorkspace) {
+    return (
+      <ErrorState
+        body="No workspace is available for this account yet."
         title="Workspace is unavailable"
       />
     );
@@ -112,11 +158,9 @@ export function LinkGenerator() {
         return;
       }
 
-      const workspaceId = authenticatedSession.user.defaultWorkspaceId;
-
-      if (!workspaceId) {
+      if (!selectedWorkspace) {
         setCreateError({
-          message: "No default workspace is available for this account.",
+          message: "Choose a workspace before creating a QR code.",
           supportText: null,
           upgradeRequired: false
         });
@@ -135,10 +179,11 @@ export function LinkGenerator() {
             patternColor
           },
           exports: ["png", "svg"],
+          folderId: selectedFolderId,
           settings: defaultSettings,
           title: normalizeFieldValue(title),
           type: "link",
-          workspaceId
+          workspaceId: selectedWorkspace.id
         });
 
         const qrCode = await getDashboardQrCode(
@@ -198,6 +243,48 @@ export function LinkGenerator() {
         </div>
 
         <div className="form-grid">
+          <div>
+            <label className="label" htmlFor="generator-workspace">
+              Workspace
+            </label>
+            <select
+              className="select"
+              id="generator-workspace"
+              onChange={(event) => chooseWorkspace(event.target.value)}
+              value={selectedWorkspaceId}
+            >
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="label" htmlFor="generator-folder">
+              Folder
+            </label>
+            <select
+              className="select"
+              id="generator-folder"
+              onChange={(event) =>
+                chooseFolder(event.target.value ? event.target.value : null)
+              }
+              value={selectedFolderId ?? ""}
+            >
+              <option value="">No folder</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.name}
+                </option>
+              ))}
+            </select>
+            {foldersState.status === "loading" ? (
+              <div className="muted">Loading folders...</div>
+            ) : null}
+          </div>
+
           <div>
             <label className="label" htmlFor="generator-title">
               Title
@@ -272,6 +359,18 @@ export function LinkGenerator() {
           </div>
         </div>
 
+        <div className="callout">
+          <div>
+            <strong>Saving to:</strong> {selectedWorkspace.name}
+            {selectedWorkspace.customDomain ? ` | Custom domain ${selectedWorkspace.customDomain}` : ""}
+          </div>
+          <div className="muted">
+            {selectedFolderId
+              ? `Folder: ${folders.find((folder) => folder.id === selectedFolderId)?.name ?? "Selected folder"}`
+              : "This QR will stay at the root of the workspace."}
+          </div>
+        </div>
+
         {createError ? (
           <div className="callout danger">
             <div>{createError.message}</div>
@@ -308,6 +407,10 @@ export function LinkGenerator() {
               <h2 className="h2">{createdQr.title ?? createdQr.slug}</h2>
               <div>Status: {getStatusLabel(createdQr.status)}</div>
               <div className="muted mono">{createdQr.slug}</div>
+              <div className="muted">
+                Workspace: {selectedWorkspace.name}
+                {createdQr.folder ? ` | Folder: ${createdQr.folder.name}` : ""}
+              </div>
               {getQrLinkTarget(createdQr) ? (
                 <a
                   className="dashboard-link mono break-word"

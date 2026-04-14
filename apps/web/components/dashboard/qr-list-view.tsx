@@ -5,9 +5,13 @@ import Link from "next/link";
 import { qrStatuses, qrTypes } from "@qr/types";
 import { useDeferredValue, useEffect, useState } from "react";
 import {
+  createDashboardFolder,
+  createDashboardWorkspace,
   deleteDashboardQrCode,
   downloadDashboardQrAsset,
   duplicateDashboardQrCode,
+  exportDashboardQrCodes,
+  importDashboardQrCodes,
   listDashboardQrCodes,
   postDashboardQrAction,
   type DashboardQrListResponse
@@ -29,12 +33,29 @@ import {
   startFileDownload,
   toErrorMessage
 } from "./dashboard-utils";
+import { useWorkspaceSelection } from "./use-workspace-selection";
 
 export function QrListView({
   token
 }: {
   token: string;
 }) {
+  const {
+    chooseFolder,
+    chooseWorkspace,
+    folders,
+    foldersState,
+    refreshFolders,
+    refreshWorkspaces,
+    selectedFolder,
+    selectedFolderId,
+    selectedWorkspace,
+    selectedWorkspaceId,
+    workspaces,
+    workspacesState
+  } = useWorkspaceSelection({
+    token
+  });
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [sortValue, setSortValue] = useState<QrSortValue>("updated-desc");
@@ -47,6 +68,10 @@ export function QrListView({
   } | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [folderName, setFolderName] = useState("");
+  const [importFormat, setImportFormat] = useState<"csv" | "json">("csv");
+  const [importData, setImportData] = useState("title,link\nSpring launch,https://example.com/spring");
   const [qrCodesState, setQrCodesState] =
     useState<RemoteState<DashboardQrListResponse>>(createInitialRemoteState);
   const deferredSearch = useDeferredValue(searchValue);
@@ -56,6 +81,10 @@ export function QrListView({
   }
 
   useEffect(() => {
+    if (!selectedWorkspaceId) {
+      return;
+    }
+
     let isActive = true;
     setActionError(null);
 
@@ -70,7 +99,8 @@ export function QrListView({
       page: 1,
       pageSize: 100,
       status: statusFilter === "ALL" ? undefined : statusFilter,
-      type: typeFilter === "ALL" ? undefined : typeFilter
+      type: typeFilter === "ALL" ? undefined : typeFilter,
+      workspaceId: selectedWorkspaceId
     })
       .then((response) => {
         if (!isActive) {
@@ -100,11 +130,15 @@ export function QrListView({
     return () => {
       isActive = false;
     };
-  }, [reloadNonce, statusFilter, token, typeFilter]);
+  }, [reloadNonce, selectedWorkspaceId, statusFilter, token, typeFilter]);
 
+  const workspaceItems = workspacesState.data?.items ?? [];
   const items = qrCodesState.data?.items ?? [];
+  const folderFilteredItems = selectedFolderId
+    ? items.filter((qrCode) => qrCode.folderId === selectedFolderId)
+    : items;
   const filteredItems = sortQrCodes(
-    items.filter((qrCode) => matchesSearch(qrCode, deferredSearch)),
+    folderFilteredItems.filter((qrCode) => matchesSearch(qrCode, deferredSearch)),
     sortValue
   );
 
@@ -202,12 +236,169 @@ export function QrListView({
     }
   }
 
-  if (qrCodesState.status === "loading" && !qrCodesState.data) {
+  async function handleCreateWorkspace() {
+    const trimmedName = workspaceName.trim();
+
+    if (!trimmedName) {
+      setActionError({
+        message: "Enter a workspace name before creating it.",
+        supportText: null,
+        upgradeRequired: false
+      });
+      return;
+    }
+
+    setBusyActionKey("workspace:create");
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      const workspace = await createDashboardWorkspace(token, {
+        name: trimmedName
+      });
+      setWorkspaceName("");
+      refreshWorkspaces();
+      chooseWorkspace(workspace.id);
+      setActionMessage(`Workspace "${workspace.name}" is ready.`);
+    } catch (error) {
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: false
+      });
+    } finally {
+      setBusyActionKey(null);
+    }
+  }
+
+  async function handleCreateFolder() {
+    if (!selectedWorkspaceId) {
+      return;
+    }
+
+    const trimmedName = folderName.trim();
+
+    if (!trimmedName) {
+      setActionError({
+        message: "Enter a folder name before creating it.",
+        supportText: null,
+        upgradeRequired: false
+      });
+      return;
+    }
+
+    setBusyActionKey("folder:create");
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      const folder = await createDashboardFolder(token, selectedWorkspaceId, {
+        name: trimmedName
+      });
+      setFolderName("");
+      refreshFolders();
+      chooseFolder(folder.id);
+      setActionMessage(`Folder "${folder.name}" is ready.`);
+    } catch (error) {
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: false
+      });
+    } finally {
+      setBusyActionKey(null);
+    }
+  }
+
+  async function handleExport(format: "csv" | "json") {
+    if (!selectedWorkspaceId) {
+      return;
+    }
+
+    setBusyActionKey(`export:${format}`);
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      const file = await exportDashboardQrCodes(token, selectedWorkspaceId, format);
+      startFileDownload(file);
+      setActionMessage(
+        format === "csv"
+          ? "CSV export downloaded."
+          : "JSON export downloaded."
+      );
+    } catch (error) {
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: false
+      });
+    } finally {
+      setBusyActionKey(null);
+    }
+  }
+
+  async function handleImport() {
+    if (!selectedWorkspaceId) {
+      return;
+    }
+
+    setBusyActionKey("import");
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      const imported = await importDashboardQrCodes(token, selectedWorkspaceId, {
+        data: importData,
+        folderId: selectedFolderId,
+        format: importFormat
+      });
+      setReloadNonce((value) => value + 1);
+      setActionMessage(`Imported ${imported.createdCount} QR code${imported.createdCount === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: isUpgradeRequiredError(error)
+      });
+    } finally {
+      setBusyActionKey(null);
+    }
+  }
+
+  if (workspacesState.status === "loading" && !workspacesState.data) {
     return (
       <main data-testid="qr-list-view">
         <LoadingState
-          body="Loading your QR codes and the latest scan counts."
+          body="Loading your workspaces and QR codes."
           title="Loading your QR codes"
+        />
+      </main>
+    );
+  }
+
+  if (workspacesState.status === "error") {
+    return (
+      <main data-testid="qr-list-view">
+        <ErrorState
+          body={workspacesState.errorMessage ?? "We couldn't load your workspaces right now."}
+          supportText={
+            workspacesState.errorRequestId
+              ? `Support reference: ${workspacesState.errorRequestId}`
+              : null
+          }
+          title="Could not load dashboard workspaces"
+        />
+      </main>
+    );
+  }
+
+  if (!selectedWorkspace) {
+    return (
+      <main data-testid="qr-list-view">
+        <EmptyState
+          body="Create a workspace to start organizing QR codes."
+          title="No workspace available"
         />
       </main>
     );
@@ -230,36 +421,17 @@ export function QrListView({
     );
   }
 
-  if ((qrCodesState.data?.total ?? 0) === 0) {
-    return (
-      <main data-testid="qr-list-view">
-        <EmptyState
-          action={
-            <>
-              <Link className="button" href={"/generator" as Route}>
-                Create your first link QR
-              </Link>
-              <Link className="button secondary" href={"/dashboard/billing" as Route}>
-                Review plan & billing
-              </Link>
-            </>
-          }
-          body="You haven't created any QR codes yet. Start with a link QR and it will appear here as soon as it is saved."
-          title="No QR codes yet"
-        />
-      </main>
-    );
-  }
+  const totalQrCodes = qrCodesState.data?.total ?? items.length;
 
   return (
     <main className="stack-xl" data-testid="qr-list-view">
-      <section className="card">
+      <section className="card stack-lg">
         <div className="toolbar">
           <div>
-            <span className="badge">QR codes</span>
-            <h1 className="h2">Manage your QR codes</h1>
+            <span className="badge">Workspace</span>
+            <h1 className="h2">Manage your QR program</h1>
             <p className="muted">
-              Search by title, filter by status, and take action on codes you already created.
+              Switch workspaces, group QR codes into folders, and import or export batches without leaving the dashboard.
             </p>
           </div>
           <div className="table-actions">
@@ -290,6 +462,189 @@ export function QrListView({
             ) : null}
           </div>
         ) : null}
+
+        <div className="form-grid">
+          <div>
+            <label className="label" htmlFor="workspace-select">
+              Workspace
+            </label>
+            <select
+              className="select"
+              data-testid="workspace-select"
+              id="workspace-select"
+              onChange={(event) => chooseWorkspace(event.target.value)}
+              value={selectedWorkspaceId}
+            >
+              {workspaceItems.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+            <div className="muted">
+              Plan: {selectedWorkspace.plan} | QR codes: {selectedWorkspace.qrCodeCount}
+              {selectedWorkspace.customDomain ? ` | Domain: ${selectedWorkspace.customDomain}` : ""}
+            </div>
+          </div>
+
+          <div>
+            <label className="label" htmlFor="workspace-name">
+              New workspace
+            </label>
+            <input
+              className="input"
+              data-testid="workspace-name"
+              id="workspace-name"
+              onChange={(event) => setWorkspaceName(event.target.value)}
+              placeholder="Campaign Ops"
+              value={workspaceName}
+            />
+            <button
+              className="button secondary compact"
+              data-testid="workspace-create"
+              disabled={busyActionKey === "workspace:create"}
+              onClick={handleCreateWorkspace}
+              type="button"
+            >
+              {busyActionKey === "workspace:create" ? "Creating..." : "Create workspace"}
+            </button>
+          </div>
+
+          <div>
+            <label className="label" htmlFor="folder-select">
+              Folder filter
+            </label>
+            <select
+              className="select"
+              data-testid="folder-select"
+              id="folder-select"
+              onChange={(event) => chooseFolder(event.target.value ? event.target.value : null)}
+              value={selectedFolderId ?? ""}
+            >
+              <option value="">All folders</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.name}
+                </option>
+              ))}
+            </select>
+            <div className="muted">
+              {foldersState.status === "loading"
+                ? "Loading folders..."
+                : selectedFolder
+                  ? `Showing ${selectedFolder.name}`
+                  : "Showing every folder in this workspace"}
+            </div>
+          </div>
+
+          <div>
+            <label className="label" htmlFor="folder-name">
+              New folder
+            </label>
+            <input
+              className="input"
+              data-testid="folder-name"
+              id="folder-name"
+              onChange={(event) => setFolderName(event.target.value)}
+              placeholder="Spring launch"
+              value={folderName}
+            />
+            <button
+              className="button secondary compact"
+              data-testid="folder-create"
+              disabled={busyActionKey === "folder:create"}
+              onClick={handleCreateFolder}
+              type="button"
+            >
+              {busyActionKey === "folder:create" ? "Creating..." : "Create folder"}
+            </button>
+          </div>
+        </div>
+
+        <div className="dashboard-split">
+          <div className="card compact-card stack-md">
+            <div>
+              <h2 className="h2">Bulk export</h2>
+              <p className="muted">
+                Download the current workspace inventory as JSON or CSV.
+              </p>
+            </div>
+            <div className="table-actions">
+              <button
+                className="button secondary compact"
+                data-testid="qr-export-json"
+                disabled={busyActionKey === "export:json"}
+                onClick={() => handleExport("json")}
+                type="button"
+              >
+                {busyActionKey === "export:json" ? "Preparing..." : "Export JSON"}
+              </button>
+              <button
+                className="button secondary compact"
+                data-testid="qr-export-csv"
+                disabled={busyActionKey === "export:csv"}
+                onClick={() => handleExport("csv")}
+                type="button"
+              >
+                {busyActionKey === "export:csv" ? "Preparing..." : "Export CSV"}
+              </button>
+            </div>
+          </div>
+
+          <div className="card compact-card stack-md">
+            <div>
+              <h2 className="h2">Bulk import</h2>
+              <p className="muted">
+                Import link QR codes into the selected workspace{selectedFolder ? ` and folder ${selectedFolder.name}` : ""}.
+              </p>
+            </div>
+            <div className="form-grid">
+              <div>
+                <label className="label" htmlFor="qr-import-format">
+                  Format
+                </label>
+                <select
+                  className="select"
+                  data-testid="qr-import-format"
+                  id="qr-import-format"
+                  onChange={(event) => setImportFormat(event.target.value as "csv" | "json")}
+                  value={importFormat}
+                >
+                  <option value="csv">CSV</option>
+                  <option value="json">JSON</option>
+                </select>
+              </div>
+            </div>
+            <textarea
+              className="input"
+              data-testid="qr-import-data"
+              onChange={(event) => setImportData(event.target.value)}
+              rows={5}
+              value={importData}
+            />
+            <button
+              className="button secondary compact"
+              data-testid="qr-import-submit"
+              disabled={busyActionKey === "import"}
+              onClick={handleImport}
+              type="button"
+            >
+              {busyActionKey === "import" ? "Importing..." : "Import QR codes"}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="toolbar">
+          <div>
+            <span className="badge">QR codes</span>
+            <h2 className="h2">QR list</h2>
+            <p className="muted">
+              Search by title, filter by status, and manage the QR codes inside {selectedWorkspace.name}.
+            </p>
+          </div>
+        </div>
 
         <div className="form-grid">
           <div>
@@ -364,14 +719,29 @@ export function QrListView({
 
         <div className="meta-row">
           <span className="muted">
-            Showing {filteredItems.length} of {qrCodesState.data?.total ?? items.length} QR codes
+            Showing {filteredItems.length} of {totalQrCodes} QR codes in {selectedWorkspace.name}
           </span>
           {qrCodesState.status === "loading" ? (
             <span className="muted">Refreshing...</span>
           ) : null}
         </div>
 
-        {filteredItems.length === 0 ? (
+        {totalQrCodes === 0 ? (
+          <EmptyState
+            action={
+              <>
+                <Link className="button" href={"/generator" as Route}>
+                  Create your first link QR
+                </Link>
+                <Link className="button secondary" href={"/dashboard/settings" as Route}>
+                  Connect a custom domain
+                </Link>
+              </>
+            }
+            body={`No QR codes exist in ${selectedWorkspace.name} yet. Create one from the generator or import a batch above.`}
+            title="No QR codes yet"
+          />
+        ) : filteredItems.length === 0 ? (
           <EmptyState
             action={
               <>
@@ -382,6 +752,7 @@ export function QrListView({
                     setSortValue("updated-desc");
                     setStatusFilter("ALL");
                     setTypeFilter("ALL");
+                    chooseFolder(null);
                   }}
                   type="button"
                 >
@@ -392,7 +763,7 @@ export function QrListView({
                 </Link>
               </>
             }
-            body="No QR codes match the current search, status, or type filters."
+            body="No QR codes match the current search, status, type, or folder filters."
             title="Nothing matches these filters"
           />
         ) : (
@@ -402,7 +773,7 @@ export function QrListView({
                 <tr>
                   <th>QR code</th>
                   <th>Status</th>
-                  <th>Type</th>
+                  <th>Folder</th>
                   <th>Scans</th>
                   <th>Last scan</th>
                   <th>Updated</th>
@@ -417,6 +788,10 @@ export function QrListView({
                         <strong>{getQrDisplayName(qrCode)}</strong>
                         <span className="muted mono">{qrCode.slug}</span>
                         <span className="muted mono">{qrCode.shortUrl}</span>
+                        <span className="muted">
+                          {qrCode.workspace.name}
+                          {qrCode.folder ? ` | ${qrCode.folder.name}` : ""}
+                        </span>
                       </div>
                     </td>
                     <td>
@@ -424,7 +799,7 @@ export function QrListView({
                         {getStatusLabel(qrCode.status)}
                       </span>
                     </td>
-                    <td>{qrCode.type}</td>
+                    <td>{qrCode.folder?.name ?? "Root"}</td>
                     <td>{formatNumber(qrCode.scansCount)}</td>
                     <td>{formatDateTime(qrCode.lastScanAt)}</td>
                     <td>{formatDateTime(qrCode.updatedAt)}</td>

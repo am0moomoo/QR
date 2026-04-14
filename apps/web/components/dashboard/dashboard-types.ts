@@ -37,6 +37,7 @@ export type RemoteState<T> = {
 };
 
 export const authStorageKey = "qrflow.dashboard.session";
+export const workspaceSelectionStorageKey = "qrflow.dashboard.workspace";
 
 export const qrSortOptions = [
   { label: "Recently updated", value: "updated-desc" },

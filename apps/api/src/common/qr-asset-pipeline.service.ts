@@ -14,14 +14,20 @@ import {
 } from "./qr-render.service";
 import { StorageService } from "./storage.service";
 import { StructuredLoggerService } from "./structured-logger.service";
+import { getWorkspaceShortBaseUrl } from "./workspace-branding.util";
 
 export type QrCodeRecord = Prisma.QRCodeGetPayload<{
   include: {
     assets: true;
     content: true;
     design: true;
+    folder: true;
     redirectRules: true;
-    workspace: true;
+    workspace: {
+      include: {
+        customDomains: true;
+      };
+    };
   };
 }>;
 
@@ -50,8 +56,13 @@ export class QrAssetPipelineService {
         assets: true,
         content: true,
         design: true,
+        folder: true,
         redirectRules: true,
-        workspace: true
+        workspace: {
+          include: {
+            customDomains: true
+          }
+        }
       }
     });
   }
@@ -92,7 +103,7 @@ export class QrAssetPipelineService {
         const renderedAsset = await this.qrRender.render({
           design: this.toRenderDesign(qrCode.design),
           format,
-          shortUrl: this.buildShortUrl(qrCode.slug),
+          shortUrl: this.buildShortUrl(qrCode),
           slug: qrCode.slug
         });
         const storageKey = this.buildStorageKey(qrCode, renderedAsset);
@@ -198,13 +209,8 @@ export class QrAssetPipelineService {
     return `qr/${qrCode.workspaceId}/${qrCode.id}/${renderedAsset.checksum}.${renderedAsset.extension}`;
   }
 
-  private buildShortUrl(slug: string) {
-    const baseUrl = (
-      process.env.SHORT_DOMAIN ??
-      process.env.API_URL ??
-      "http://localhost:4000"
-    ).replace(/\/$/, "");
-    return `${baseUrl}/r/${slug}`;
+  private buildShortUrl(qrCode: QrCodeRecord) {
+    return `${getWorkspaceShortBaseUrl(qrCode.workspace)}/r/${qrCode.slug}`;
   }
 
   private buildDownloadUrl(qrCodeId: string, format: string) {

@@ -15,7 +15,7 @@ Update this file after each major Codex pass.
 - [~] Prisma wired
 - [x] env loading
 - [~] lint/typecheck/test setup
-- [!] Docker local services
+- [x] Docker local services
 
 ## Auth and users
 - [x] register/login
@@ -25,9 +25,9 @@ Update this file after each major Codex pass.
 - [x] profile settings
 
 ## Workspace and folders
-- [~] workspaces
+- [x] workspaces
 - [ ] members
-- [ ] folders
+- [x] folders
 - [ ] folder sharing
 - [ ] audit logs
 
@@ -66,6 +66,9 @@ Update this file after each major Codex pass.
 - [x] analytics page
 - [x] profile/settings page
 - [x] QR management actions
+- [x] workspace and folder management
+- [x] custom domain management
+- [x] bulk import/export
 - [x] dashboard e2e smoke
 
 ## Billing
@@ -81,7 +84,7 @@ Update this file after each major Codex pass.
 - [~] API v1 create/update/get
 - [ ] webhook endpoints
 - [ ] safety checks
-- [ ] custom domains
+- [x] custom domains
 
 ## Ops
 - [~] CI/CD
@@ -106,6 +109,7 @@ Update this file after each major Codex pass.
 - [x] runtime env template
 - [x] runtime compose shape
 - [x] operator deployment docs
+- [x] local deployment rehearsal
 
 ## Production readiness
 - [~] local + S3/R2 storage abstraction
@@ -113,10 +117,14 @@ Update this file after each major Codex pass.
 - [x] queued scan-event processing
 - [x] render/scan idempotency + retries
 - [!] notification delivery/jobs
-- [~] worker separation from API runtime
+- [x] worker separation from API runtime
 
 ## Verification truth
 - locally verified:
+  - observed in this session for the growth-features pass: `pnpm lint`, `pnpm --filter @qr/web build`, `pnpm --filter @qr/web typecheck`, `pnpm --filter @qr/api test:integration`, and `pnpm test:dashboard:e2e`
+  - exact growth API flow observed green in this session: `register -> create workspace -> create folder -> attach custom domain -> verify custom domain -> create link QR in workspace/folder -> get QR with workspace/folder/customDomain metadata -> download PNG/SVG -> export workspace QR codes as JSON/CSV -> import QR codes from CSV -> list workspace QR codes -> resolve branded short-link host`
+  - exact growth browser flow observed green in this session: `sign in -> create workspace -> create folder -> connect and verify custom domain -> create QR in generator -> dashboard list shows workspace/folder metadata -> export JSON -> import CSV -> list search/filter/sort -> details -> analytics -> billing workspace selector + free-plan limit block -> premium upgrade test-mode flow -> profile update -> duplicate -> archive -> delete -> logout`
+  - observed in this session that the billing page now exposes a workspace selector and the generator, dashboard list, details page, settings custom-domain view, and bulk import/export flow all operate on live workspace-scoped API data
   - observed in this session for the security/resilience pass: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm test:dashboard:e2e`
   - exact security/resilience API flow observed green in this session: `unauthenticated /me -> logout invalidates bearer session -> unsafe QR payload with embedded credentials rejected -> unsafe avatar URL rejected -> billing success/cancel open-redirect rejected -> create QR -> corrupted PNG asset repaired on download -> render queue failure returns user-safe 503 with request ID -> invalid webhook signature rejected -> duplicate webhook delivery stays idempotent`
   - exact security/resilience browser flow still observed green in this session after the hardening changes: `sign in -> create QR -> list/details/download/analytics -> billing/test-mode flow -> quota block -> profile update -> duplicate -> archive -> delete -> logout`
@@ -129,6 +137,13 @@ Update this file after each major Codex pass.
   - exact API billing/quota smoke observed green in deterministic test mode: `register -> login -> create QR -> render PNG/SVG -> download -> billing summary on free -> ads-off gate denied on free -> free QR limit denied at 3/3 -> checkout session creation -> signed webhook sync -> premium plan applied -> invoice synced -> premium ads-off QR allowed -> storage quota denied -> forgot/reset password -> profile update`
   - exact browser billing/product smoke observed green in deterministic test mode: `sign in -> empty QR list -> create link QR -> list/details/download/analytics -> billing page shows Free 3/3 -> free-limit create blocked -> checkout return -> signed webhook sync -> billing page shows Premium + invoice -> premium create unlocked -> profile update -> duplicate -> archive -> delete -> logout`
 - CI-verified:
+  - no new CI run observed yet for the 2026-04-14 growth-features pass; current growth truth is local-only until a fresh GitHub Actions run is actually observed on this branch head
+  - GitHub Actions run `ci #34` (`24401092755`) succeeded on commit `30ec499ea66fa1a77168b1d7f96ca7184a5d3577`
+  - passed jobs on `ci #34`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
+  - observed skipped jobs on `ci #34`: `verify-real-bucket`, `verify-staging-smoke`
+  - observed `verify` step success on `ci #34` for `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, and `Dashboard end-to-end smoke`
+  - exact security/resilience API flow observed green on `ci #34`: `unauthenticated /me -> logout invalidates bearer session -> unsafe QR payload with embedded credentials rejected -> unsafe avatar URL rejected -> billing success/cancel open-redirect rejected -> create QR -> corrupted PNG asset repaired on download -> render queue failure returns user-safe 503 with request ID -> invalid webhook signature rejected -> duplicate webhook delivery stays idempotent`
+  - exact security/resilience browser flow observed green on `ci #34`: `sign in -> create QR -> list/details/download/analytics -> billing/test-mode flow -> quota block -> profile update -> duplicate -> archive -> delete -> logout`
   - GitHub Actions run `ci #32` (`24387454663`) succeeded on commit `ba8695348054ea8c2cf376039f9d3582bcf0c6a0`
   - passed jobs on `ci #32`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
   - observed skipped jobs on `ci #32`: `verify-real-bucket`, `verify-staging-smoke`
@@ -163,6 +178,14 @@ Update this file after each major Codex pass.
   - GitHub Actions run `ci #24` (`24334027215`) succeeded on commit `ea02b7e3ae833f48bdc355edd1a9fe47f8f96c8e`
   - passed jobs on `ci #24`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
   - observed skipped jobs on `ci #24`: `verify-real-bucket`, `verify-staging-smoke`
+- locally deployment-rehearsed:
+  - observed on this machine that `pnpm.cmd deploy:up` successfully booted the production-like runtime compose stack with `postgres`, `redis`, one-shot `migrate`, one-shot `seed`, `api`, `worker`, and `web`
+  - observed on this machine that `migrate` applied `20260413000100_initial` and `20260413000200_scan_event_request_id_unique` successfully before app services started
+  - observed on this machine that `seed` completed successfully and logged seeded demo data for `demo@qrflow.local`, workspace slug `demo-owner`, and QR slug `demo-link`
+  - observed on this machine that `docker compose ... ps` reported healthy `postgres`, `redis`, `api`, `worker`, and `web` services after startup
+  - observed on this machine that the runtime compose smoke succeeded via `API_URL=http://localhost:4000 APP_URL=http://localhost:3000 pnpm.cmd deploy:smoke`
+  - exact runtime compose smoke flow observed green on this machine: `register -> login -> create QR -> render PNG/SVG -> download PNG/SVG -> scan slug -> analytics update -> profile update -> forgot-password request`
+  - observed on this machine that runtime-local storage needed to be mounted and resolved at `/app/storage`, seed had to be part of the compose startup path, nested workspace `node_modules` and `.next` needed to be excluded from Docker context, and the smoke flow had to poll asset readiness while BullMQ workers finished async render jobs
 - staging-verified:
   - none yet
   - staging deployment files, healthchecked compose services, manual workflow, and smoke script are prepared, but no staging URL and no observed staging smoke run were available in this session
@@ -172,7 +195,6 @@ Update this file after each major Codex pass.
   - the real-bucket smoke path now exists in `apps/api/src/integration/real-bucket.spec.ts` and the repository CI can attempt it through job `verify-real-bucket`
   - GitHub Actions job `verify-real-bucket` was observed as `skipped` on `ci #32`, `ci #31`, and `ci #24` because the repository did not expose the required `REAL_BUCKET_STORAGE_DRIVER` variable and live S3/R2 secrets together
 - MVP-only or not yet live-verified beyond CI:
-  - the latest security/resilience hardening pass is locally observed only in this session; no GitHub Actions run for these exact commits has been observed yet
   - the new deploy foundation in `deploy/runtime/` is prepared in-repo and CI-compatible, but it is not staging-verified or hosting-verified
   - remote S3/R2 object storage lifecycle, signed-download redirects, and orphan cleanup against a live bucket
   - orphan cleanup as an operator-run maintenance task instead of scheduled retention automation
@@ -180,12 +202,10 @@ Update this file after each major Codex pass.
   - forgot/reset password in a production-like staging environment with real email delivery or a smoke mailbox
   - metrics, traces, dead-letter handling, notification jobs, backup strategy, and security review
 - top remaining production blockers:
-  - the new security/resilience pass is not yet CI-observed on current HEAD, so live GitHub verification for these exact changes is still pending
   - no observed staging deployment yet for `web`, `api`, `worker`, `postgres`, `redis`, and storage together
   - no observed S3/R2 verification yet for upload/download/render lifecycle, signed URL policy, or orphan cleanup against a real bucket
   - the repo still needs real staging variables and real bucket secrets configured before GitHub Actions can move those optional jobs from `skipped` to observed execution
-  - staging smoke currently requires an explicit `STAGING_SMOKE_WORKSPACE_ID` because workspace listing/management is intentionally still out of scope
-  - the new `deploy/runtime/` shape is prepared for a future deploy, but Docker-based runtime boot has not been observed from this machine because Docker is still unavailable locally
+  - the current runtime compose rehearsal is observed only on local Docker Desktop with local-volume storage; it is not yet staging-verified or hosting-verified
   - billing is now verified only in deterministic mock/test mode; a live Stripe test account, hosted checkout, and externally delivered webhook run are still unobserved
   - production-only private-host blocking for redirect/avatar-style URLs is coded behind `NODE_ENV=production` or `ALLOW_PRIVATE_TARGET_URLS=false`, but that exact branch is not yet observed in a deployed environment
 
@@ -196,9 +216,9 @@ Update this file after each major Codex pass.
 - quota coverage is currently observed for `ads off`, QR-count limits, and storage limits only; API-access quotas and retention enforcement remain incomplete
 
 ## UI shipped vs backend-capable
-- shipped in UI: sign in, session restore across refresh, logout, generator create flow, QR list, QR details, analytics, profile/settings, QR management actions (`download`, `duplicate`, `archive`, `delete`), billing page with plan summary/quota usage/invoice history, and upgrade/downgrade entry points in deterministic test mode
-- backend-capable only: Google OAuth, API keys, webhooks, custom domains, folders/workspaces
-- intentionally not started in UI: billing polish, bulk import, folders/workspaces, custom domains, visual polish
+- shipped in UI: sign in, session restore across refresh, logout, generator create flow, QR list, QR details, analytics, profile/settings, QR management actions (`download`, `duplicate`, `archive`, `delete`), workspace creation/selection, folder creation/filtering, custom-domain connect/verify management, bulk QR import/export, billing page with workspace-scoped plan summary/quota usage/invoice history, and upgrade/downgrade entry points in deterministic test mode
+- backend-capable only: Google OAuth, API keys, webhooks
+- intentionally not started in UI: notification rules, billing polish beyond current deterministic test-mode flow, and visual polish
 
 ## Notes
 - starter monorepo scaffold added
@@ -220,7 +240,8 @@ Update this file after each major Codex pass.
 - 2026-04-13: observed GitHub Actions run `ci #2` (`24322804861`) succeed on commit `37ee22106e7e41f8c8ae26ab4ad656d591acf133`; passed job: `verify`
 - 2026-04-13: observed `verify` step success in GitHub Actions for `Install dependencies`, `Generate Prisma client`, `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, and `API integration smoke`
 - 2026-04-13: exact end-to-end smoke flow verified green in GitHub Actions on `37ee22106e7e41f8c8ae26ab4ad656d591acf133`: `register -> login -> create QR -> render PNG/SVG -> download -> scan slug -> persist raw scan event -> update daily aggregate -> forgot/reset password -> update profile`
-- 2026-04-13: verified blocker in this session: Docker is not installed, and `localhost:5432` / `localhost:6379` are closed, so `docker compose up`, `prisma migrate deploy`, Redis verification, seed execution, and true end-to-end integration runs remain blocked on local infrastructure
+- 2026-04-14: local deployment rehearsal now succeeds on this machine through `pnpm.cmd deploy:up` with Docker Desktop, runtime compose healthchecks, one-shot `migrate` + `seed`, separate `api` and `worker` roles, and `pnpm.cmd deploy:smoke` against the composed stack
+- 2026-04-14: workspaces, folders, custom domains, and workspace-scoped bulk QR import/export are now implemented in the API and dashboard UI; `openapi/openapi.yaml` was extended to cover the shipped workspace endpoints and QR response metadata
 - 2026-04-13: dashboard UI now ships real bearer-authenticated pages for QR list, QR details, analytics, and profile/settings on top of `/me`, `/qr-codes`, `/qr-codes/{id}`, `/qr-codes/{id}/downloads`, and `/qr-codes/{id}/analytics`
 - 2026-04-13: dashboard UI now exposes a real link-QR generator flow on top of the live backend; folders/workspaces, billing polish, custom domains, bulk import, and visual polish remain intentionally out of scope
 - 2026-04-13: local verification for the dashboard pass completed with `pnpm build`, `pnpm typecheck`, `pnpm lint`, `@qr/api test:unit`, `@qr/api test:integration` skip-mode, `node --check scripts/run-dashboard-e2e.mjs`, and `pnpm exec playwright test apps/web/e2e/dashboard.spec.ts --list`

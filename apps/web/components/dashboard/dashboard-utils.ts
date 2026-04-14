@@ -1,14 +1,17 @@
 import {
   type DashboardAnalyticsDailyPoint,
+  type DashboardFolder,
   type DashboardQrCode,
   type DashboardUser,
+  type DashboardWorkspace,
   DashboardApiError
 } from "../../lib/dashboard-api";
 import {
   type QrSortValue,
   type RemoteState,
   type StoredSession,
-  authStorageKey
+  authStorageKey,
+  workspaceSelectionStorageKey
 } from "./dashboard-types";
 
 export function readStoredSession() {
@@ -44,6 +47,7 @@ export function clearStoredSession() {
   }
 
   window.localStorage.removeItem(authStorageKey);
+  window.localStorage.removeItem(workspaceSelectionStorageKey);
 }
 
 export function toErrorMessage(error: unknown) {
@@ -297,4 +301,98 @@ export function startFileDownload(file: { blob: Blob; fileName: string }) {
   anchor.click();
   anchor.remove();
   window.URL.revokeObjectURL(objectUrl);
+}
+
+export function readSelectedWorkspaceId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage.getItem(workspaceSelectionStorageKey);
+}
+
+export function writeSelectedWorkspaceId(workspaceId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(workspaceSelectionStorageKey, workspaceId);
+}
+
+export function readSelectedFolderId(workspaceId: string) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage.getItem(`${workspaceSelectionStorageKey}:${workspaceId}:folder`);
+}
+
+export function writeSelectedFolderId(workspaceId: string, folderId: string | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const storageKey = `${workspaceSelectionStorageKey}:${workspaceId}:folder`;
+
+  if (!folderId) {
+    window.localStorage.removeItem(storageKey);
+    return;
+  }
+
+  window.localStorage.setItem(storageKey, folderId);
+}
+
+export function pickWorkspace(
+  workspaces: DashboardWorkspace[],
+  preferredWorkspaceId?: string | null
+) {
+  if (preferredWorkspaceId) {
+    const matchedWorkspace = workspaces.find(
+      (workspace) => workspace.id === preferredWorkspaceId
+    );
+
+    if (matchedWorkspace) {
+      return matchedWorkspace;
+    }
+  }
+
+  const storedWorkspaceId = readSelectedWorkspaceId();
+
+  if (storedWorkspaceId) {
+    const storedWorkspace = workspaces.find(
+      (workspace) => workspace.id === storedWorkspaceId
+    );
+
+    if (storedWorkspace) {
+      return storedWorkspace;
+    }
+  }
+
+  return workspaces[0] ?? null;
+}
+
+export function pickFolder(
+  folders: DashboardFolder[],
+  workspaceId: string,
+  preferredFolderId?: string | null
+) {
+  if (preferredFolderId) {
+    const matchedFolder = folders.find((folder) => folder.id === preferredFolderId);
+
+    if (matchedFolder) {
+      return matchedFolder;
+    }
+  }
+
+  const storedFolderId = readSelectedFolderId(workspaceId);
+
+  if (storedFolderId) {
+    const storedFolder = folders.find((folder) => folder.id === storedFolderId);
+
+    if (storedFolder) {
+      return storedFolder;
+    }
+  }
+
+  return null;
 }

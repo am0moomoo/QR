@@ -137,7 +137,12 @@ Update this file after each major Codex pass.
   - exact API billing/quota smoke observed green in deterministic test mode: `register -> login -> create QR -> render PNG/SVG -> download -> billing summary on free -> ads-off gate denied on free -> free QR limit denied at 3/3 -> checkout session creation -> signed webhook sync -> premium plan applied -> invoice synced -> premium ads-off QR allowed -> storage quota denied -> forgot/reset password -> profile update`
   - exact browser billing/product smoke observed green in deterministic test mode: `sign in -> empty QR list -> create link QR -> list/details/download/analytics -> billing page shows Free 3/3 -> free-limit create blocked -> checkout return -> signed webhook sync -> billing page shows Premium + invoice -> premium create unlocked -> profile update -> duplicate -> archive -> delete -> logout`
 - CI-verified:
-  - no new CI run observed yet for the 2026-04-14 growth-features pass; current growth truth is local-only until a fresh GitHub Actions run is actually observed on this branch head
+  - GitHub Actions run `ci #35` (`24416148656`) succeeded on commit `cf3540f227ed1b0169c190b4e3a712a991ef1e80`
+  - passed jobs on `ci #35`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
+  - observed skipped jobs on `ci #35`: `verify-staging-smoke`, `verify-real-bucket`
+  - observed `verify` step success on `ci #35` for `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, and `Dashboard end-to-end smoke`
+  - exact growth API flow observed green on `ci #35`: `register -> create workspace -> create folder -> attach custom domain -> verify custom domain -> create link QR in workspace/folder -> get QR with workspace/folder/customDomain metadata -> download PNG/SVG -> export workspace QR codes as JSON/CSV -> import QR codes from CSV -> list workspace QR codes -> resolve branded short-link host`
+  - exact growth browser flow observed green on `ci #35`: `sign in -> create workspace -> create folder -> connect and verify custom domain -> create QR in generator -> dashboard list shows workspace/folder metadata -> export JSON -> import CSV -> list search/filter/sort -> details -> analytics -> billing workspace selector + free-plan limit block -> premium upgrade test-mode flow -> profile update -> duplicate -> archive -> delete -> logout`
   - GitHub Actions run `ci #34` (`24401092755`) succeeded on commit `30ec499ea66fa1a77168b1d7f96ca7184a5d3577`
   - passed jobs on `ci #34`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
   - observed skipped jobs on `ci #34`: `verify-real-bucket`, `verify-staging-smoke`

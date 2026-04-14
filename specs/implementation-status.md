@@ -141,6 +141,12 @@ Update this file after each major Codex pass.
   - exact API billing/quota smoke observed green in deterministic test mode: `register -> login -> create QR -> render PNG/SVG -> download -> billing summary on free -> ads-off gate denied on free -> free QR limit denied at 3/3 -> checkout session creation -> signed webhook sync -> premium plan applied -> invoice synced -> premium ads-off QR allowed -> storage quota denied -> forgot/reset password -> profile update`
   - exact browser billing/product smoke observed green in deterministic test mode: `sign in -> empty QR list -> create link QR -> list/details/download/analytics -> billing page shows Free 3/3 -> free-limit create blocked -> checkout return -> signed webhook sync -> billing page shows Premium + invoice -> premium create unlocked -> profile update -> duplicate -> archive -> delete -> logout`
 - CI-verified:
+  - GitHub Actions run `ci #38` (`24417950723`) succeeded on commit `fa424e6d4681a8f4a37ff08570c5e13c21d630bc`
+  - passed jobs on `ci #38`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
+  - observed skipped jobs on `ci #38`: `verify-staging-smoke`, `verify-real-bucket`
+  - observed `verify` step success on `ci #38` for `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, and `Dashboard end-to-end smoke`
+  - exact product-finish browser flow observed green on `ci #38`: `register -> logout -> login -> create workspace -> create folder -> connect and verify custom domain -> create QR in the generator -> generator download SVG -> export JSON -> export CSV -> import CSV batch -> refresh restores session -> QR list search/sort -> QR details download PNG -> analytics -> billing free-limit block -> checkout return auto-refresh -> premium create unlocked -> duplicate from details -> archive -> delete -> profile update -> custom domain removal -> logout -> protected route returns to auth form`
+  - the current integration smoke suite also passed on `ci #38`, re-verifying the existing API truth for auth, QR CRUD/render/download, scan/analytics, billing test-mode sync, and profile flows alongside the product-finish browser pass
   - GitHub Actions run `ci #35` (`24416148656`) succeeded on commit `cf3540f227ed1b0169c190b4e3a712a991ef1e80`
   - passed jobs on `ci #35`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
   - observed skipped jobs on `ci #35`: `verify-staging-smoke`, `verify-real-bucket`

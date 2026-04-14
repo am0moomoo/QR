@@ -18,13 +18,17 @@ export function LoadingState({
 
 export function ErrorState({
   actionLabel,
+  actions,
   body,
   onRetry,
+  supportText,
   title
 }: {
   actionLabel?: string;
+  actions?: ReactNode;
   body: string;
   onRetry?: () => void;
+  supportText?: string | null;
   title: string;
 }) {
   return (
@@ -32,10 +36,16 @@ export function ErrorState({
       <span className="badge">Error</span>
       <h1 className="h2">{title}</h1>
       <p className="muted">{body}</p>
-      {onRetry ? (
-        <button className="button" onClick={onRetry} type="button">
-          {actionLabel ?? "Retry"}
-        </button>
+      {supportText ? <p className="muted">{supportText}</p> : null}
+      {onRetry || actions ? (
+        <div className="table-actions">
+          {onRetry ? (
+            <button className="button" onClick={onRetry} type="button">
+              {actionLabel ?? "Retry"}
+            </button>
+          ) : null}
+          {actions}
+        </div>
       ) : null}
     </section>
   );
@@ -55,7 +65,7 @@ export function EmptyState({
       <span className="badge">Empty</span>
       <h1 className="h2">{title}</h1>
       <p className="muted">{body}</p>
-      {action}
+      {action ? <div className="table-actions">{action}</div> : null}
     </section>
   );
 }

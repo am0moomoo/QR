@@ -47,11 +47,53 @@ export function clearStoredSession() {
 }
 
 export function toErrorMessage(error: unknown) {
-  if (error instanceof DashboardApiError || error instanceof Error) {
+  if (error instanceof DashboardApiError) {
+    if (error.status === 401) {
+      return "Your session ended. Sign in again to keep managing your QR codes.";
+    }
+
+    if (
+      error.status === 404 &&
+      /download|asset/i.test(error.message)
+    ) {
+      return "This download is not ready yet. Refresh assets and try again.";
+    }
+
+    if (error.status === 404 && /QR code not found/i.test(error.message)) {
+      return "This QR code is no longer available in your dashboard.";
+    }
+
+    if (error.status >= 500) {
+      return "We hit a server issue while completing that request. Please try again.";
+    }
+
+    return error.message;
+  }
+
+  if (error instanceof Error) {
     return error.message;
   }
 
   return "Something went wrong while talking to the API.";
+}
+
+export function getErrorRequestId(error: unknown) {
+  return error instanceof DashboardApiError ? error.requestId : null;
+}
+
+export function getErrorSupportText(error: unknown) {
+  const requestId = getErrorRequestId(error);
+  return requestId ? `Support reference: ${requestId}` : null;
+}
+
+export function isUpgradeRequiredError(error: unknown) {
+  const message = toErrorMessage(error).toLowerCase();
+  return (
+    message.includes("upgrade") ||
+    message.includes("premium plan only") ||
+    message.includes("allows up to") ||
+    message.includes("storage")
+  );
 }
 
 export function formatDateTime(value: string | null) {
@@ -134,6 +176,7 @@ export function createInitialRemoteState<T>(): RemoteState<T> {
   return {
     data: null,
     errorMessage: null,
+    errorRequestId: null,
     status: "loading"
   };
 }

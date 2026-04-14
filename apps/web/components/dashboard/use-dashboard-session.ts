@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import {
   DashboardApiError,
+  dashboardSessionExpiredEvent,
   fetchDashboardUser,
   logoutDashboardUser
 } from "../../lib/dashboard-api";
@@ -71,6 +72,35 @@ export function useDashboardSession() {
 
     return () => {
       isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleSessionExpired(event: Event) {
+      const customEvent = event as CustomEvent<{ requestId?: string | null }>;
+      const requestId = customEvent.detail?.requestId;
+
+      clearStoredSession();
+      setSessionState({
+        errorMessage: requestId
+          ? `Your session ended. Sign in again to continue. Reference: ${requestId}`
+          : "Your session ended. Sign in again to continue.",
+        status: "unauthenticated",
+        token: null,
+        user: null
+      });
+    }
+
+    window.addEventListener(
+      dashboardSessionExpiredEvent,
+      handleSessionExpired as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        dashboardSessionExpiredEvent,
+        handleSessionExpired as EventListener
+      );
     };
   }, []);
 

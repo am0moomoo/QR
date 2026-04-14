@@ -196,16 +196,28 @@ type DashboardAnalyticsQuery = {
 };
 
 export class DashboardApiError extends Error {
+  code: string | null;
   details: unknown;
+  requestId: string | null;
   status: number;
 
-  constructor(message: string, status: number, details?: unknown) {
+  constructor(
+    message: string,
+    status: number,
+    details?: unknown,
+    requestId?: string | null,
+    code?: string | null
+  ) {
     super(message);
     this.name = "DashboardApiError";
+    this.code = code ?? null;
     this.status = status;
     this.details = details;
+    this.requestId = requestId ?? null;
   }
 }
+
+export const dashboardSessionExpiredEvent = "qrflow:session-expired";
 
 function normalizeBaseUrl(value: string) {
   const trimmed = value.replace(/\/$/, "");
@@ -228,26 +240,47 @@ export function getDashboardApiBaseUrl() {
 
 async function parseError(response: Response) {
   const contentType = response.headers.get("content-type") ?? "";
+  const requestId = response.headers.get("x-request-id");
 
   if (contentType.includes("application/json")) {
     const json = (await response.json()) as {
+      code?: string;
       error?: string;
       message?: string | string[];
+      requestId?: string;
     };
     const message = Array.isArray(json.message)
       ? json.message.join(", ")
       : json.message ?? json.error ?? "Request failed";
     return {
+      code: json.code ?? null,
       details: json,
-      message
+      message,
+      requestId: json.requestId ?? requestId
     };
   }
 
   const text = await response.text();
   return {
+    code: null,
     details: text,
-    message: text || "Request failed"
+    message: text || "Request failed",
+    requestId
   };
+}
+
+function dispatchSessionExpired(requestId: string | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent(dashboardSessionExpiredEvent, {
+      detail: {
+        requestId
+      }
+    })
+  );
 }
 
 async function dashboardRequest<T>(
@@ -272,7 +305,17 @@ async function dashboardRequest<T>(
 
   if (!response.ok) {
     const error = await parseError(response);
-    throw new DashboardApiError(error.message, response.status, error.details);
+    if (response.status === 401 && token) {
+      dispatchSessionExpired(error.requestId ?? null);
+    }
+
+    throw new DashboardApiError(
+      error.message,
+      response.status,
+      error.details,
+      error.requestId,
+      error.code
+    );
   }
 
   if (response.status === 204) {
@@ -518,7 +561,17 @@ export async function downloadDashboardQrAsset(
 
   if (!response.ok) {
     const error = await parseError(response);
-    throw new DashboardApiError(error.message, response.status, error.details);
+    if (response.status === 401 && token) {
+      dispatchSessionExpired(error.requestId ?? null);
+    }
+
+    throw new DashboardApiError(
+      error.message,
+      response.status,
+      error.details,
+      error.requestId,
+      error.code
+    );
   }
 
   return {

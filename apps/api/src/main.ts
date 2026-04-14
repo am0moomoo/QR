@@ -1,29 +1,14 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
-import { RequestMethod, ValidationPipe } from "@nestjs/common";
 import { AppModule } from "./app.module";
+import { configureApiApp } from "./bootstrap-api";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     rawBody: true
   });
-
-  app.enableCors();
-  app.setGlobalPrefix("api/v1", {
-    exclude: [
-      { path: "r/:slug", method: RequestMethod.GET },
-      { path: "r/:slug/password", method: RequestMethod.POST },
-      { path: "inactive", method: RequestMethod.GET },
-      { path: "landing/:slug", method: RequestMethod.GET }
-    ]
-  });
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true
-    })
-  );
+  configureApiApp(app);
 
   const config = new DocumentBuilder()
     .setTitle("QRFlow API")

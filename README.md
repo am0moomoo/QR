@@ -21,6 +21,8 @@ pnpm install
 docker compose up -d
 cp .env.example .env
 pnpm db:generate
+pnpm db:migrate:deploy
+pnpm db:seed
 pnpm dev
 ```
 
@@ -34,6 +36,24 @@ pnpm dev
 ## Implementation rule
 
 Use `prompts/codex-master-prompt.md` first, then phase prompts one by one. Keep `specs/implementation-status.md` updated after each meaningful block of work.
+
+## Product runbooks
+
+- Local runbook: `specs/08_local_runbook.md`
+- Environment setup guide: `specs/09_env_setup_guide.md`
+- Smoke checklist: `specs/10_smoke_test_checklist.md`
+- Release checklist: `specs/11_release_checklist.md`
+- Known limitations: `specs/12_known_limitations.md`
+
+## Core verification commands
+
+```bash
+pnpm build
+pnpm lint
+pnpm typecheck
+pnpm --filter @qr/api test:integration
+pnpm test:dashboard:e2e
+```
 
 ## Important
 

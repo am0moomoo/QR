@@ -9,11 +9,13 @@ import {
   type DashboardQrCode
 } from "../../lib/dashboard-api";
 import { DashboardAuthPanel } from "../dashboard/dashboard-auth-panel";
-import { ErrorState, LoadingState } from "../dashboard/dashboard-state";
+import { EmptyState, ErrorState, LoadingState } from "../dashboard/dashboard-state";
 import { useDashboardSession } from "../dashboard/use-dashboard-session";
 import {
+  getErrorSupportText,
   getQrLinkTarget,
   getStatusLabel,
+  isUpgradeRequiredError,
   normalizeFieldValue,
   startFileDownload,
   toErrorMessage
@@ -54,8 +56,15 @@ export function LinkGenerator() {
   const [backgroundColor, setBackgroundColor] = useState("#ffffff");
   const [errorCorrection, setErrorCorrection] = useState<"L" | "M" | "Q" | "H">("M");
   const [createdQr, setCreatedQr] = useState<DashboardQrCode | null>(null);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<{
+    message: string;
+    supportText: string | null;
+    upgradeRequired: boolean;
+  } | null>(null);
+  const [downloadError, setDownloadError] = useState<{
+    message: string;
+    supportText: string | null;
+  } | null>(null);
   const [busyDownload, setBusyDownload] = useState<"png" | "svg" | null>(null);
   const [isCreating, startCreateTransition] = useTransition();
 
@@ -95,14 +104,22 @@ export function LinkGenerator() {
 
     startCreateTransition(async () => {
       if (!authenticatedSession) {
-        setCreateError("The generator session is not ready yet.");
+        setCreateError({
+          message: "The generator session is not ready yet.",
+          supportText: null,
+          upgradeRequired: false
+        });
         return;
       }
 
       const workspaceId = authenticatedSession.user.defaultWorkspaceId;
 
       if (!workspaceId) {
-        setCreateError("No default workspace is available for this account.");
+        setCreateError({
+          message: "No default workspace is available for this account.",
+          supportText: null,
+          upgradeRequired: false
+        });
         return;
       }
 
@@ -130,7 +147,11 @@ export function LinkGenerator() {
         );
         setCreatedQr(qrCode);
       } catch (error) {
-        setCreateError(toErrorMessage(error));
+        setCreateError({
+          message: toErrorMessage(error),
+          supportText: getErrorSupportText(error),
+          upgradeRequired: isUpgradeRequiredError(error)
+        });
       }
     });
   }
@@ -151,7 +172,10 @@ export function LinkGenerator() {
       );
       startFileDownload(file);
     } catch (error) {
-      setDownloadError(toErrorMessage(error));
+      setDownloadError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error)
+      });
     } finally {
       setBusyDownload(null);
     }
@@ -248,7 +272,19 @@ export function LinkGenerator() {
           </div>
         </div>
 
-        {createError ? <div className="callout danger">{createError}</div> : null}
+        {createError ? (
+          <div className="callout danger">
+            <div>{createError.message}</div>
+            {createError.supportText ? <div className="muted">{createError.supportText}</div> : null}
+            {createError.upgradeRequired ? (
+              <div className="table-actions" style={{ marginTop: 10 }}>
+                <Link className="button secondary compact" href="/dashboard/billing">
+                  Review plans
+                </Link>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="table-actions">
           <button
@@ -319,11 +355,24 @@ export function LinkGenerator() {
               </Link>
             </div>
 
-            {downloadError ? <div className="callout danger">{downloadError}</div> : null}
+            {downloadError ? (
+              <div className="callout danger">
+                <div>{downloadError.message}</div>
+                {downloadError.supportText ? <div className="muted">{downloadError.supportText}</div> : null}
+              </div>
+            ) : null}
           </div>
         ) : (
-          <div className="muted" data-testid="generator-empty-result">
-            Create a QR code to see its slug, short URL, and downloads here.
+          <div data-testid="generator-empty-result">
+            <EmptyState
+              action={
+                <Link className="button secondary" href="/dashboard">
+                  Open dashboard
+                </Link>
+              }
+              body="Create a QR code to see its slug, short URL, downloads, and next steps here."
+              title="No QR created yet"
+            />
           </div>
         )}
       </section>

@@ -87,12 +87,19 @@ Update this file after each major Codex pass.
 - [~] CI/CD
 - [~] staging deployment target
 - [~] staging smoke workflow
-- [~] structured logs
+- [x] structured logs
 - [ ] metrics
 - [ ] traces
 - [ ] backups
 - [ ] load tests
 - [ ] security review
+
+## Docs and runbooks
+- [x] local runbook
+- [x] env/setup guide
+- [x] smoke-test checklist
+- [x] release checklist
+- [x] known limitations
 
 ## Production readiness
 - [~] local + S3/R2 storage abstraction
@@ -104,10 +111,14 @@ Update this file after each major Codex pass.
 
 ## Verification truth
 - locally verified:
-  - observed in this session: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm --filter @qr/api test:integration`, and `pnpm test:dashboard:e2e`
+  - observed in this session for the launch-readiness pass: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm --filter @qr/api test:integration`, and `pnpm test:dashboard:e2e`
+  - exact support/readiness API flow observed green in this session: `request-id middleware -> sanitized 403 API error body with matching X-Request-Id -> friendly invalid public scan 404 HTML -> friendly inactive public scan 410 HTML -> full existing auth/QR/billing/reset/profile integration smoke`
+  - exact support/readiness browser flow observed green in this session: `sign in -> empty QR list -> create link QR -> refresh restores session -> QR details -> analytics -> billing -> quota block surfaced without raw internals -> profile update -> duplicate -> archive -> delete -> logout -> protected route returns to auth form`
+  - repo-level operator docs added and checked into the tree in this session: [README.md](C:/Users/aziz0/Desktop/qr-platform-starter/README.md), [08_local_runbook.md](C:/Users/aziz0/Desktop/qr-platform-starter/specs/08_local_runbook.md), [09_env_setup_guide.md](C:/Users/aziz0/Desktop/qr-platform-starter/specs/09_env_setup_guide.md), [10_smoke_test_checklist.md](C:/Users/aziz0/Desktop/qr-platform-starter/specs/10_smoke_test_checklist.md), [11_release_checklist.md](C:/Users/aziz0/Desktop/qr-platform-starter/specs/11_release_checklist.md), and [12_known_limitations.md](C:/Users/aziz0/Desktop/qr-platform-starter/specs/12_known_limitations.md)
   - exact API billing/quota smoke observed green in deterministic test mode: `register -> login -> create QR -> render PNG/SVG -> download -> billing summary on free -> ads-off gate denied on free -> free QR limit denied at 3/3 -> checkout session creation -> signed webhook sync -> premium plan applied -> invoice synced -> premium ads-off QR allowed -> storage quota denied -> forgot/reset password -> profile update`
   - exact browser billing/product smoke observed green in deterministic test mode: `sign in -> empty QR list -> create link QR -> list/details/download/analytics -> billing page shows Free 3/3 -> free-limit create blocked -> checkout return -> signed webhook sync -> billing page shows Premium + invoice -> premium create unlocked -> profile update -> duplicate -> archive -> delete -> logout`
 - CI-verified:
+  - no newer GitHub Actions run was observed in this session for the launch-readiness pass; CI truth below still reflects the last observed green runs before these support-state and docs changes
   - GitHub Actions run `ci #29` (`24384899553`) succeeded on commit `15560cd378054e25dc353c8d279b651f860774e4`
   - passed jobs on `ci #29`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
   - observed skipped jobs on `ci #29`: `verify-real-bucket`, `verify-staging-smoke`
@@ -141,6 +152,7 @@ Update this file after each major Codex pass.
   - the real-bucket smoke path now exists in `apps/api/src/integration/real-bucket.spec.ts` and the repository CI can attempt it through job `verify-real-bucket`
   - GitHub Actions job `verify-real-bucket` was observed as `skipped` on `ci #24` because the repository did not expose the required `REAL_BUCKET_STORAGE_DRIVER` variable and live S3/R2 secrets together
 - MVP-only or not yet live-verified beyond CI:
+  - launch-readiness refinements from this pass are locally verified only so far: shared API bootstrap parity, request IDs on sanitized API failures, public invalid/inactive scan HTML states, and the new runbook/checklist docs
   - remote S3/R2 object storage lifecycle, signed-download redirects, and orphan cleanup against a live bucket
   - orphan cleanup as an operator-run maintenance task instead of scheduled retention automation
   - dedicated deployed worker container/process observed in staging
@@ -219,3 +231,7 @@ Update this file after each major Codex pass.
 - 2026-04-13: observed locally in this session with `pnpm.cmd test:dashboard:e2e` that the browser flow now works end to end on live web+api servers: `register -> login -> truthful empty dashboard state -> generator create link QR -> dashboard list row appears -> search/filter/sort -> QR details -> analytics -> profile/settings`
 - 2026-04-13: observed locally in this session with `pnpm.cmd build`, `pnpm.cmd lint`, `pnpm.cmd typecheck`, `pnpm.cmd test`, and `pnpm.cmd test:dashboard:e2e` that the usable-product UI flow now works on live web+api servers: `sign in -> empty QR list -> create link QR from generator -> QR appears in dashboard list -> refresh restores session -> QR details -> PNG download -> analytics -> profile update -> duplicate -> archive -> delete -> logout -> protected route returns to auth form`
 - 2026-04-13: `scripts/run-dashboard-e2e.mjs` now truthfully refuses occupied test ports and supports Windows process spawning, so local dashboard smoke no longer piggybacks on stale listeners or fails before browser startup
+- 2026-04-14: launch-readiness pass added a shared API bootstrap helper so runtime middleware/filter behavior now matches integration tests, including request IDs, sanitized API errors, CORS, global validation, and public-route exclusions
+- 2026-04-14: launch-readiness pass improved support/admin readiness with request IDs on API failures, friendlier user-facing error copy in the web app, no internal stack details in UI responses, and public invalid/inactive/password/rate-limited scan pages that render product-facing HTML states instead of raw failures
+- 2026-04-14: launch-readiness pass added repo-level operator docs for local setup, verification, release checks, and known limitations under `specs/08_*` through `specs/12_*` plus README links
+- 2026-04-14: observed locally in this session with `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm --filter @qr/api test:integration`, and `pnpm test:dashboard:e2e` that the support/readiness improvements hold on live app runs, including sanitized 4xx API responses with `X-Request-Id`, friendly invalid public scan 404 HTML, friendly inactive public scan 410 HTML, and the existing usable dashboard/billing browser flow

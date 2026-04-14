@@ -18,9 +18,12 @@ import {
   createInitialRemoteState,
   formatDateTime,
   formatNumber,
+  getErrorRequestId,
+  getErrorSupportText,
   getQrDisplayName,
   getStatusLabel,
   getStatusTone,
+  isUpgradeRequiredError,
   matchesSearch,
   sortQrCodes,
   startFileDownload,
@@ -37,7 +40,11 @@ export function QrListView({
   const [sortValue, setSortValue] = useState<QrSortValue>("updated-desc");
   const [searchValue, setSearchValue] = useState("");
   const [reloadNonce, setReloadNonce] = useState(0);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<{
+    message: string;
+    supportText: string | null;
+    upgradeRequired: boolean;
+  } | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
   const [qrCodesState, setQrCodesState] =
@@ -55,6 +62,7 @@ export function QrListView({
     setQrCodesState((currentState) => ({
       data: currentState.data,
       errorMessage: null,
+      errorRequestId: null,
       status: "loading"
     }));
 
@@ -72,6 +80,7 @@ export function QrListView({
         setQrCodesState({
           data: response,
           errorMessage: null,
+          errorRequestId: null,
           status: "ready"
         });
       })
@@ -83,6 +92,7 @@ export function QrListView({
         setQrCodesState({
           data: null,
           errorMessage: toErrorMessage(error),
+          errorRequestId: getErrorRequestId(error),
           status: "error"
         });
       });
@@ -108,7 +118,11 @@ export function QrListView({
       const file = await downloadDashboardQrAsset(token, qrId, format);
       startFileDownload(file);
     } catch (error) {
-      setActionError(toErrorMessage(error));
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: isUpgradeRequiredError(error)
+      });
     } finally {
       setBusyActionKey(null);
     }
@@ -125,7 +139,11 @@ export function QrListView({
       setActionMessage("A copy of the QR code is ready in your list.");
       setReloadNonce((value) => value + 1);
     } catch (error) {
-      setActionError(toErrorMessage(error));
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: isUpgradeRequiredError(error)
+      });
     } finally {
       setBusyActionKey(null);
     }
@@ -149,7 +167,11 @@ export function QrListView({
       );
       setReloadNonce((value) => value + 1);
     } catch (error) {
-      setActionError(toErrorMessage(error));
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: isUpgradeRequiredError(error)
+      });
     } finally {
       setBusyActionKey(null);
     }
@@ -170,7 +192,11 @@ export function QrListView({
       setActionMessage("The QR code was deleted.");
       setReloadNonce((value) => value + 1);
     } catch (error) {
-      setActionError(toErrorMessage(error));
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: isUpgradeRequiredError(error)
+      });
     } finally {
       setBusyActionKey(null);
     }
@@ -193,6 +219,11 @@ export function QrListView({
         <ErrorState
           body={qrCodesState.errorMessage ?? "We couldn't load your QR codes right now."}
           onRetry={() => setReloadNonce((value) => value + 1)}
+          supportText={
+            qrCodesState.errorRequestId
+              ? `Support reference: ${qrCodesState.errorRequestId}`
+              : null
+          }
           title="Could not load QR codes"
         />
       </main>
@@ -204,11 +235,16 @@ export function QrListView({
       <main data-testid="qr-list-view">
         <EmptyState
           action={
-            <Link className="button" href={"/generator" as Route}>
-              Create your first link QR
-            </Link>
+            <>
+              <Link className="button" href={"/generator" as Route}>
+                Create your first link QR
+              </Link>
+              <Link className="button secondary" href={"/dashboard/billing" as Route}>
+                Review plan & billing
+              </Link>
+            </>
           }
-          body="You haven't created any QR codes yet. Start with a link QR and it will appear here right away."
+          body="You haven't created any QR codes yet. Start with a link QR and it will appear here as soon as it is saved."
           title="No QR codes yet"
         />
       </main>
@@ -241,7 +277,19 @@ export function QrListView({
         </div>
 
         {actionMessage ? <div className="callout success">{actionMessage}</div> : null}
-        {actionError ? <div className="callout danger">{actionError}</div> : null}
+        {actionError ? (
+          <div className="callout danger">
+            <div>{actionError.message}</div>
+            {actionError.supportText ? <div className="muted">{actionError.supportText}</div> : null}
+            {actionError.upgradeRequired ? (
+              <div className="table-actions" style={{ marginTop: 10 }}>
+                <Link className="button secondary compact" href={"/dashboard/billing" as Route}>
+                  Review plans
+                </Link>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="form-grid">
           <div>
@@ -324,9 +372,29 @@ export function QrListView({
         </div>
 
         {filteredItems.length === 0 ? (
-          <div className="callout">
-            No QR codes match the current search and filter combination.
-          </div>
+          <EmptyState
+            action={
+              <>
+                <button
+                  className="button secondary"
+                  onClick={() => {
+                    setSearchValue("");
+                    setSortValue("updated-desc");
+                    setStatusFilter("ALL");
+                    setTypeFilter("ALL");
+                  }}
+                  type="button"
+                >
+                  Clear filters
+                </button>
+                <Link className="button" href={"/generator" as Route}>
+                  Create another QR
+                </Link>
+              </>
+            }
+            body="No QR codes match the current search, status, or type filters."
+            title="Nothing matches these filters"
+          />
         ) : (
           <div className="table-wrap">
             <table className="table" data-testid="qr-list-table">

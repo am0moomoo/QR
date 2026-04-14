@@ -23,11 +23,14 @@ import {
   formatDateTime,
   formatBooleanLabel,
   formatNumber,
+  getErrorRequestId,
+  getErrorSupportText,
   getDefaultRange,
   getQrDisplayName,
   getQrLinkTarget,
   getStatusLabel,
   getStatusTone,
+  isUpgradeRequiredError,
   startFileDownload,
   toErrorMessage
 } from "./dashboard-utils";
@@ -43,7 +46,11 @@ export function QrDetailsView({
   const [detailsState, setDetailsState] =
     useState<RemoteState<{ analytics: DashboardAnalyticsResponse; qrCode: DashboardQrCode }>>(createInitialRemoteState);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<{
+    message: string;
+    supportText: string | null;
+    upgradeRequired: boolean;
+  } | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
 
@@ -52,6 +59,7 @@ export function QrDetailsView({
       setDetailsState({
         data: null,
         errorMessage: "QR id is missing from the route.",
+        errorRequestId: null,
         status: "error"
       });
       return;
@@ -63,6 +71,7 @@ export function QrDetailsView({
     setDetailsState((currentState) => ({
       data: currentState.data,
       errorMessage: null,
+      errorRequestId: null,
       status: "loading"
     }));
 
@@ -75,6 +84,7 @@ export function QrDetailsView({
         setDetailsState({
           data: { analytics, qrCode },
           errorMessage: null,
+          errorRequestId: null,
           status: "ready"
         });
       })
@@ -86,6 +96,7 @@ export function QrDetailsView({
         setDetailsState({
           data: null,
           errorMessage: toErrorMessage(error),
+          errorRequestId: getErrorRequestId(error),
           status: "error"
         });
       });
@@ -117,7 +128,11 @@ export function QrDetailsView({
       );
       setReloadNonce((value) => value + 1);
     } catch (error) {
-      setActionError(toErrorMessage(error));
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: isUpgradeRequiredError(error)
+      });
     } finally {
       setBusyAction(null);
     }
@@ -136,7 +151,11 @@ export function QrDetailsView({
       await duplicateDashboardQrCode(token, qrId);
       setActionMessage("A copy of this QR code was added to your dashboard.");
     } catch (error) {
-      setActionError(toErrorMessage(error));
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: isUpgradeRequiredError(error)
+      });
     } finally {
       setBusyAction(null);
     }
@@ -164,7 +183,11 @@ export function QrDetailsView({
       router.push("/dashboard");
       router.refresh();
     } catch (error) {
-      setActionError(toErrorMessage(error));
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: isUpgradeRequiredError(error)
+      });
     } finally {
       setBusyAction(null);
     }
@@ -182,7 +205,11 @@ export function QrDetailsView({
       const file = await downloadDashboardQrAsset(token, qrId, download.format);
       startFileDownload(file);
     } catch (error) {
-      setActionError(toErrorMessage(error));
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error),
+        upgradeRequired: isUpgradeRequiredError(error)
+      });
     } finally {
       setBusyAction(null);
     }
@@ -202,6 +229,16 @@ export function QrDetailsView({
       <ErrorState
         body={detailsState.errorMessage ?? "QR details are unavailable."}
         onRetry={() => setReloadNonce((value) => value + 1)}
+        supportText={
+          detailsState.errorRequestId
+            ? `Support reference: ${detailsState.errorRequestId}`
+            : null
+        }
+        actions={
+          <Link className="button secondary" href={"/dashboard" as Route}>
+            Back to QR list
+          </Link>
+        }
         title="Could not load this QR code"
       />
     );
@@ -293,7 +330,29 @@ export function QrDetailsView({
         </div>
 
         {actionMessage ? <div className="callout success">{actionMessage}</div> : null}
-        {actionError ? <div className="callout danger">{actionError}</div> : null}
+        {actionError ? (
+          <div className="callout danger">
+            <div>{actionError.message}</div>
+            {actionError.supportText ? <div className="muted">{actionError.supportText}</div> : null}
+            {actionError.upgradeRequired ? (
+              <div className="table-actions" style={{ marginTop: 10 }}>
+                <Link className="button secondary compact" href={"/dashboard/billing" as Route}>
+                  Review plans
+                </Link>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {qrCode.status !== "ACTIVE" ? (
+          <div className="callout">
+            {qrCode.status === "INACTIVE"
+              ? "This QR code is inactive, so new scans will not redirect until you reactivate it."
+              : qrCode.status === "ARCHIVED"
+                ? "This QR code is archived. Downloads stay visible here, but scans should stay disabled."
+                : "This QR code is not currently available for new scans."}
+          </div>
+        ) : null}
 
         <div className="stats-grid" data-testid="qr-details-summary">
           {summaryCards.map((card) => (
@@ -381,7 +440,7 @@ export function QrDetailsView({
             <h2 className="h2">Assets & downloads</h2>
             {qrCode.downloads.length === 0 ? (
               <div className="callout">
-                No downloads are ready yet. Refresh assets to render the latest files.
+                No downloads are ready yet. Refresh assets to render the latest files for this QR code.
               </div>
             ) : (
               <div className="stack-sm">

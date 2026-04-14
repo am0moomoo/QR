@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Injectable,
   NotFoundException
 } from "@nestjs/common";
@@ -231,6 +232,10 @@ export class QrCodesService {
 
       return this.toCreateQrResponse(createdQr);
     } catch (error) {
+      if (error instanceof HttpException && error.getStatus() < 500) {
+        throw error;
+      }
+
       this.logger.error(
         "qr.create_failed",
         error,

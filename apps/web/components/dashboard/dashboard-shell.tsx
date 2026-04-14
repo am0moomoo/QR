@@ -62,9 +62,9 @@ export function DashboardShell({
         <div className="stack-lg">
           <div>
             <span className="badge">QRFlow</span>
-            <h1 className="h2">Your QR workspace</h1>
+            <h1 className="h2">Run your QR program</h1>
             <p className="muted">
-              Create codes, manage downloads, and review scan activity from one place.
+              Create codes, review scans, manage billing, and keep your account settings in one place.
             </p>
           </div>
 

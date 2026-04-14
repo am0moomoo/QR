@@ -17,4 +17,5 @@ export type AuthenticatedSession = {
 export type AuthenticatedRequest = Request & {
   currentSession?: AuthenticatedSession;
   currentUser?: AuthenticatedUser;
+  requestId?: string;
 };

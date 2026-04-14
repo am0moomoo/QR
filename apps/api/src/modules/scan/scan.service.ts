@@ -8,6 +8,7 @@ import { compare } from "bcryptjs";
 import { createHash, randomUUID } from "node:crypto";
 import { type QrType, getQrTargetUrl } from "@qr/types";
 import type { Request } from "express";
+import type { AuthenticatedRequest } from "../../common/authenticated-request";
 import { PrismaService } from "../../common/prisma.service";
 import { ScanEventQueueService } from "../../common/scan-event-queue.service";
 import { ScanRateLimitService } from "../../common/scan-rate-limit.service";
@@ -177,49 +178,42 @@ export class ScanService {
   }
 
   renderInactiveHtml() {
-    return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>QR inactive</title>
-    <style>
-      body { font-family: Arial, sans-serif; background: #f5f0e8; color: #1d1206; display: grid; place-items: center; min-height: 100vh; margin: 0; }
-      main { max-width: 520px; padding: 32px; background: white; border-radius: 24px; box-shadow: 0 24px 80px rgba(45, 26, 8, 0.12); }
-      h1 { margin-top: 0; }
-      a { color: #8b4d16; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>This QR code is inactive</h1>
-      <p>The owner either disabled it, reached a scan limit, or the code expired.</p>
-      <p>If you manage this QR code, sign in to the dashboard and reactivate it there.</p>
-    </main>
-  </body>
-</html>`;
+    return this.renderStateHtml({
+      accentColor: "#8b4d16",
+      body: "The owner either disabled it, reached a scan limit, or the code expired.",
+      eyebrow: "QR status",
+      hint: "If you manage this QR code, sign in to the dashboard and reactivate it there.",
+      title: "This QR code is inactive"
+    });
   }
 
-  renderPasswordHtml(slug: string, errorMessage?: string) {
+  renderPasswordHtml(slug: string, errorMessage?: string, requestId?: string) {
     return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>Password required</title>
     <style>
-      body { font-family: Arial, sans-serif; background: #eef3f8; color: #11243a; display: grid; place-items: center; min-height: 100vh; margin: 0; }
-      form { max-width: 420px; width: 100%; padding: 32px; background: white; border-radius: 24px; box-shadow: 0 24px 80px rgba(17, 36, 58, 0.12); }
-      input, button { width: 100%; box-sizing: border-box; padding: 14px 16px; border-radius: 14px; border: 1px solid #c9d5e3; margin-top: 12px; }
-      button { background: #173f6b; color: white; border: none; cursor: pointer; }
+      body { font-family: Inter, Arial, sans-serif; background: linear-gradient(180deg, #eef3f8 0%, #dfeaf5 100%); color: #11243a; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+      form { max-width: 460px; width: 100%; padding: 32px; background: white; border-radius: 24px; box-shadow: 0 24px 80px rgba(17, 36, 58, 0.12); border: 1px solid rgba(23, 63, 107, 0.08); }
+      h1 { margin: 10px 0 8px; }
+      p { color: #4b5e74; line-height: 1.5; }
+      input, button { width: 100%; box-sizing: border-box; padding: 14px 16px; border-radius: 14px; border: 1px solid #c9d5e3; margin-top: 12px; font: inherit; }
+      button { background: #173f6b; color: white; border: none; cursor: pointer; font-weight: 600; }
+      .eyebrow { color: #48607d; text-transform: uppercase; letter-spacing: 0.12em; font-size: 12px; }
       .error { color: #a71d31; margin-top: 12px; }
+      .support { color: #6a7c8f; font-size: 12px; margin-top: 16px; }
     </style>
   </head>
   <body>
     <form method="post" action="/r/${slug}/password">
+      <div class="eyebrow">Protected QR</div>
       <h1>Password required</h1>
       <p>This QR code is protected. Enter the password to continue.</p>
       <input type="password" name="password" placeholder="Password" required />
       ${errorMessage ? `<div class="error">${this.escapeHtml(errorMessage)}</div>` : ""}
       <button type="submit">Continue</button>
+      ${requestId ? `<div class="support">Reference: ${this.escapeHtml(requestId)}</div>` : ""}
     </form>
   </body>
 </html>`;
@@ -249,24 +243,35 @@ export class ScanService {
   }
 
   renderRateLimitedHtml(retryAfterSeconds: number) {
-    return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>Too many scans</title>
-    <style>
-      body { font-family: Arial, sans-serif; background: #fff4e6; color: #6b3b09; display: grid; place-items: center; min-height: 100vh; margin: 0; }
-      main { max-width: 520px; padding: 32px; background: white; border-radius: 24px; box-shadow: 0 24px 80px rgba(107, 59, 9, 0.12); }
-      h1 { margin-top: 0; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>Too many scan attempts</h1>
-      <p>This QR code is temporarily rate-limited. Please retry in about ${retryAfterSeconds} seconds.</p>
-    </main>
-  </body>
-</html>`;
+    return this.renderStateHtml({
+      accentColor: "#b05f00",
+      body: `This QR code is temporarily rate-limited. Please retry in about ${retryAfterSeconds} seconds.`,
+      eyebrow: "Please retry soon",
+      hint: "If you manage the scan path, review recent traffic before trying again.",
+      title: "Too many scan attempts"
+    });
+  }
+
+  renderNotFoundHtml(requestId?: string) {
+    return this.renderStateHtml({
+      accentColor: "#7a1f1f",
+      body: "The short link is invalid, was deleted, or is no longer available.",
+      eyebrow: "Invalid QR link",
+      hint: "If you scanned this from printed material, ask the owner for the latest QR code.",
+      requestId,
+      title: "We couldn't find this QR code"
+    });
+  }
+
+  renderUnexpectedHtml(requestId?: string) {
+    return this.renderStateHtml({
+      accentColor: "#1b4d8c",
+      body: "The QR destination is temporarily unavailable. Please try again in a moment.",
+      eyebrow: "Temporary issue",
+      hint: "If the issue keeps happening, share the reference below with support.",
+      requestId,
+      title: "This QR code could not be opened right now"
+    });
   }
 
   private async loadQrCode(slug: string) {
@@ -438,6 +443,7 @@ export class ScanService {
   }
 
   private extractRequestMetadata(request: Request) {
+    const typedRequest = request as AuthenticatedRequest;
     const userAgent = request.headers["user-agent"] ?? null;
     const ipAddress = request.ip || request.socket.remoteAddress || null;
 
@@ -450,7 +456,7 @@ export class ScanService {
       language: this.extractPrimaryLanguage(request.headers["accept-language"]),
       os: this.detectOperatingSystem(userAgent),
       referrer: request.headers.referer ?? null,
-      requestId:
+      requestId: typedRequest.requestId ??
         (Array.isArray(request.headers["x-request-id"])
           ? request.headers["x-request-id"][0]
           : request.headers["x-request-id"]) ?? randomUUID(),
@@ -581,5 +587,50 @@ export class ScanService {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+  private renderStateHtml({
+    accentColor,
+    body,
+    eyebrow,
+    hint,
+    requestId,
+    title
+  }: {
+    accentColor: string;
+    body: string;
+    eyebrow: string;
+    hint?: string;
+    requestId?: string;
+    title: string;
+  }) {
+    const supportLine = requestId
+      ? `<p class="support">Reference: ${this.escapeHtml(requestId)}</p>`
+      : "";
+
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>${this.escapeHtml(title)}</title>
+    <style>
+      body { font-family: Inter, Arial, sans-serif; background: linear-gradient(180deg, #f4f7fb 0%, #eef2f7 100%); color: #102033; display: grid; place-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+      main { max-width: 560px; padding: 32px; background: white; border-radius: 24px; box-shadow: 0 24px 80px rgba(16, 32, 51, 0.1); border: 1px solid rgba(16, 32, 51, 0.08); }
+      .eyebrow { color: ${accentColor}; text-transform: uppercase; letter-spacing: 0.12em; font-size: 12px; margin-bottom: 10px; }
+      h1 { margin: 0 0 10px; line-height: 1.15; }
+      p { color: #4b5b6a; line-height: 1.6; margin: 0 0 12px; }
+      .support { margin-top: 18px; color: #6e7f90; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">${this.escapeHtml(eyebrow)}</div>
+      <h1>${this.escapeHtml(title)}</h1>
+      <p>${this.escapeHtml(body)}</p>
+      ${hint ? `<p>${this.escapeHtml(hint)}</p>` : ""}
+      ${supportLine}
+    </main>
+  </body>
+</html>`;
   }
 }

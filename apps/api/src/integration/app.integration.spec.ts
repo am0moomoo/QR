@@ -5,13 +5,12 @@ import * as path from "node:path";
 import { createHmac } from "node:crypto";
 import test = require("node:test");
 import {
-  RequestMethod,
-  type INestApplication,
-  ValidationPipe
+  type INestApplication
 } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request = require("supertest");
 import { AppModule } from "../app.module";
+import { configureApiApp } from "../bootstrap-api";
 import { PrismaService } from "../common/prisma.service";
 import { RedisService } from "../common/redis.service";
 
@@ -65,20 +64,7 @@ test.before(async () => {
   }).compile();
 
   app = moduleRef.createNestApplication();
-  app.setGlobalPrefix("api/v1", {
-    exclude: [
-      { method: RequestMethod.GET, path: "r/:slug" },
-      { method: RequestMethod.POST, path: "r/:slug/password" },
-      { method: RequestMethod.GET, path: "inactive" },
-      { method: RequestMethod.GET, path: "landing/:slug" }
-    ]
-  });
-  app.useGlobalPipes(
-    new ValidationPipe({
-      transform: true,
-      whitelist: true
-    })
-  );
+  configureApiApp(app);
   await app.init();
 
   const prismaService = app.get(PrismaService);
@@ -239,7 +225,7 @@ test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -
   assert.equal(initialBillingSummary.body.quotas.qrCodes.limit, 3);
   assert.equal(initialBillingSummary.body.subscription, null);
 
-  await request(server)
+  const adsOffRejected = await request(server)
     .post("/api/v1/qr-codes")
     .set("Authorization", `Bearer ${bearerToken}`)
     .send({
@@ -274,6 +260,18 @@ test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -
       workspaceId: workspace.id
     })
     .expect(403);
+
+  assert.equal(adsOffRejected.body.code, "FORBIDDEN");
+  assert.equal(
+    adsOffRejected.body.message,
+    "Turning off ads is available on the Premium plan only."
+  );
+  assert.match(adsOffRejected.body.requestId, /^[0-9a-f-]{36}$/i);
+  assert.equal(
+    adsOffRejected.headers["x-request-id"],
+    adsOffRejected.body.requestId
+  );
+  assert.equal("error" in adsOffRejected.body, false);
 
   const createQr = await request(server)
     .post("/api/v1/qr-codes")
@@ -444,6 +442,21 @@ test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -
 
   assert.match(svgDownload.headers["content-type"] ?? "", /image\/svg\+xml/);
   assert.ok(String(svgDownload.body).includes("<svg"));
+
+  const missingPublicScan = await request(server)
+    .get(`/r/missing-${uniqueSuffix}`)
+    .expect(404);
+
+  assert.match(missingPublicScan.headers["content-type"] ?? "", /text\/html/);
+  assert.match(
+    missingPublicScan.text,
+    /We couldn(?:'|&#039;)t find this QR code/
+  );
+  assert.match(missingPublicScan.text, /Reference:/);
+  assert.match(
+    missingPublicScan.headers["x-request-id"] ?? "",
+    /^[0-9a-f-]{36}$/i
+  );
 
   await request(server)
     .get(`/r/${createQr.body.slug}`)
@@ -646,6 +659,18 @@ test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -
     .expect(({ body }: { body: Record<string, any> }) => {
       assert.equal(body.adsEnabled, false);
     });
+
+  await request(server)
+    .post(`/api/v1/qr-codes/${premiumQr.body.id}/deactivate`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(200);
+
+  const inactivePublicScan = await request(server)
+    .get(`/r/${premiumQr.body.slug}`)
+    .expect(410);
+
+  assert.match(inactivePublicScan.headers["content-type"] ?? "", /text\/html/);
+  assert.match(inactivePublicScan.text, /This QR code is inactive/);
 
   await prisma!.qRAsset.create({
     data: {

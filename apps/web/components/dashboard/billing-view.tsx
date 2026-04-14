@@ -1,5 +1,7 @@
 "use client";
 
+import type { Route } from "next";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   cancelDashboardSubscription,
@@ -17,6 +19,8 @@ import {
   createInitialRemoteState,
   formatBytesNumber,
   formatCurrencyCents,
+  getErrorRequestId,
+  getErrorSupportText,
   toErrorMessage
 } from "./dashboard-utils";
 
@@ -36,7 +40,10 @@ export function BillingView({
   const [summaryState, setSummaryState] =
     useState<RemoteState<DashboardBillingSummary>>(createInitialRemoteState);
   const [reloadNonce, setReloadNonce] = useState(0);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<{
+    message: string;
+    supportText: string | null;
+  } | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
@@ -54,6 +61,7 @@ export function BillingView({
         setPlansState({
           data: response,
           errorMessage: null,
+          errorRequestId: null,
           status: "ready"
         });
       })
@@ -65,6 +73,7 @@ export function BillingView({
         setPlansState({
           data: null,
           errorMessage: toErrorMessage(error),
+          errorRequestId: getErrorRequestId(error),
           status: "error"
         });
       });
@@ -79,6 +88,7 @@ export function BillingView({
       setSummaryState({
         data: null,
         errorMessage: "A default workspace is required before billing can be shown.",
+        errorRequestId: null,
         status: "error"
       });
       return;
@@ -89,6 +99,7 @@ export function BillingView({
     setSummaryState((currentState) => ({
       data: currentState.data,
       errorMessage: null,
+      errorRequestId: null,
       status: "loading"
     }));
 
@@ -101,6 +112,7 @@ export function BillingView({
         setSummaryState({
           data: response,
           errorMessage: null,
+          errorRequestId: null,
           status: "ready"
         });
       })
@@ -112,6 +124,7 @@ export function BillingView({
         setSummaryState({
           data: null,
           errorMessage: toErrorMessage(error),
+          errorRequestId: getErrorRequestId(error),
           status: "error"
         });
       });
@@ -146,7 +159,10 @@ export function BillingView({
       }
 
       if (plan.code !== "lite" && plan.code !== "premium") {
-        setActionError("This plan cannot be selected from the self-serve billing flow.");
+        setActionError({
+          message: "This plan cannot be selected from the self-serve billing flow.",
+          supportText: null
+        });
         return;
       }
 
@@ -159,7 +175,10 @@ export function BillingView({
 
       window.location.assign(session.url);
     } catch (error) {
-      setActionError(toErrorMessage(error));
+      setActionError({
+        message: toErrorMessage(error),
+        supportText: getErrorSupportText(error)
+      });
     } finally {
       setBusyAction(null);
     }
@@ -182,6 +201,11 @@ export function BillingView({
       <ErrorState
         body={plansState.errorMessage ?? "Billing plans could not be loaded."}
         onRetry={() => setReloadNonce((value) => value + 1)}
+        supportText={
+          plansState.errorRequestId
+            ? `Support reference: ${plansState.errorRequestId}`
+            : null
+        }
         title="Could not load billing"
       />
     );
@@ -192,6 +216,11 @@ export function BillingView({
       <ErrorState
         body={summaryState.errorMessage ?? "Billing summary could not be loaded."}
         onRetry={() => setReloadNonce((value) => value + 1)}
+        supportText={
+          summaryState.errorRequestId
+            ? `Support reference: ${summaryState.errorRequestId}`
+            : null
+        }
         title="Could not load billing"
       />
     );
@@ -234,7 +263,17 @@ export function BillingView({
           </div>
         ) : null}
         {actionMessage ? <div className="callout success">{actionMessage}</div> : null}
-        {actionError ? <div className="callout danger">{actionError}</div> : null}
+        {actionError ? (
+          <div className="callout danger">
+            <div>{actionError.message}</div>
+            {actionError.supportText ? <div className="muted">{actionError.supportText}</div> : null}
+            <div className="table-actions" style={{ marginTop: 10 }}>
+              <Link className="button secondary compact" href={"/dashboard/settings" as Route}>
+                Review account details
+              </Link>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="stats-grid" data-testid="billing-summary">

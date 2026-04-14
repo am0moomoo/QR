@@ -1,5 +1,7 @@
 "use client";
 
+import type { Route } from "next";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   getDashboardQrAnalytics,
@@ -15,6 +17,8 @@ import {
   createInitialRemoteState,
   formatDateTime,
   formatNumber,
+  getErrorRequestId,
+  getErrorSupportText,
   formatShortDate,
   getDefaultRange,
   getQrDisplayName,
@@ -118,6 +122,7 @@ export function AnalyticsView({
         setQrCodesState({
           data: response,
           errorMessage: null,
+          errorRequestId: null,
           status: "ready"
         });
 
@@ -141,6 +146,7 @@ export function AnalyticsView({
         setQrCodesState({
           data: null,
           errorMessage: toErrorMessage(error),
+          errorRequestId: getErrorRequestId(error),
           status: "error"
         });
       });
@@ -160,6 +166,7 @@ export function AnalyticsView({
     setAnalyticsState((currentState) => ({
       data: currentState.data,
       errorMessage: null,
+      errorRequestId: null,
       status: "loading"
     }));
 
@@ -172,6 +179,7 @@ export function AnalyticsView({
         setAnalyticsState({
           data: response,
           errorMessage: null,
+          errorRequestId: null,
           status: "ready"
         });
       })
@@ -183,6 +191,7 @@ export function AnalyticsView({
         setAnalyticsState({
           data: null,
           errorMessage: toErrorMessage(error),
+          errorRequestId: getErrorRequestId(error),
           status: "error"
         });
       });
@@ -206,6 +215,11 @@ export function AnalyticsView({
       <ErrorState
         body={qrCodesState.errorMessage ?? "Could not load the QR selector."}
         onRetry={() => setReloadNonce((value) => value + 1)}
+        supportText={
+          qrCodesState.errorRequestId
+            ? `Support reference: ${qrCodesState.errorRequestId}`
+            : null
+        }
         title="Could not load analytics"
       />
     );
@@ -216,6 +230,11 @@ export function AnalyticsView({
   if (qrCodes.length === 0) {
     return (
       <EmptyState
+        action={
+          <Link className="button" href={"/generator" as Route}>
+            Create a QR to analyze
+          </Link>
+        }
         body="Create your first QR code and scan it to start seeing analytics here."
         title="No QR codes to analyze"
       />
@@ -349,6 +368,11 @@ export function AnalyticsView({
         <ErrorState
           body={analyticsState.errorMessage ?? "Analytics request failed."}
           onRetry={() => setReloadNonce((value) => value + 1)}
+          supportText={
+            analyticsState.errorRequestId
+              ? `Support reference: ${analyticsState.errorRequestId}`
+              : null
+          }
           title="Could not load analytics"
         />
       ) : null}

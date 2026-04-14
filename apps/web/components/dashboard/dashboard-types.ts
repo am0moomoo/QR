@@ -32,6 +32,7 @@ export type SessionState =
 export type RemoteState<T> = {
   data: T | null;
   errorMessage: string | null;
+  errorRequestId: string | null;
   status: "error" | "loading" | "ready";
 };
 

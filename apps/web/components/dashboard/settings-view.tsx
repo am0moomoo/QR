@@ -2,7 +2,12 @@
 
 import { useEffect, useState, useTransition, type FormEvent } from "react";
 import { type DashboardUser, updateDashboardUser } from "../../lib/dashboard-api";
-import { normalizeFieldValue, toErrorMessage, writeStoredSession } from "./dashboard-utils";
+import {
+  getErrorSupportText,
+  normalizeFieldValue,
+  toErrorMessage,
+  writeStoredSession
+} from "./dashboard-utils";
 
 export function SettingsView({
   onUserUpdated,
@@ -17,7 +22,10 @@ export function SettingsView({
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
   const [locale, setLocale] = useState(user.locale);
   const [message, setMessage] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorState, setErrorState] = useState<{
+    message: string;
+    supportText: string | null;
+  } | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -29,7 +37,7 @@ export function SettingsView({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
-    setErrorMessage(null);
+    setErrorState(null);
 
     startTransition(async () => {
       try {
@@ -45,7 +53,10 @@ export function SettingsView({
         onUserUpdated(updatedUser);
         setMessage("Profile updated.");
       } catch (error) {
-        setErrorMessage(toErrorMessage(error));
+        setErrorState({
+          message: toErrorMessage(error),
+          supportText: getErrorSupportText(error)
+        });
       }
     });
   }
@@ -105,7 +116,12 @@ export function SettingsView({
           </div>
 
           {message ? <div className="callout success">{message}</div> : null}
-          {errorMessage ? <div className="callout danger">{errorMessage}</div> : null}
+          {errorState ? (
+            <div className="callout danger">
+              <div>{errorState.message}</div>
+              {errorState.supportText ? <div className="muted">{errorState.supportText}</div> : null}
+            </div>
+          ) : null}
 
           <button className="button" disabled={isPending} type="submit">
             {isPending ? "Saving..." : "Save profile"}

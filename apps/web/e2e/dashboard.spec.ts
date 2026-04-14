@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
+import { createHmac } from "node:crypto";
 
 const prisma = new PrismaClient();
 const appUrl = (process.env.APP_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
@@ -11,15 +12,29 @@ test.setTimeout(90_000);
 async function apiRequest<T>(
   path: string,
   options: {
-    body?: unknown;
+    body?: BodyInit | unknown;
+    headers?: Record<string, string>;
     method?: "GET" | "PATCH" | "POST";
+    rawBody?: boolean;
     token?: string;
   } = {}
 ) {
+  const body =
+    options.body === undefined
+      ? undefined
+      : options.rawBody
+        ? (options.body as BodyInit)
+        : JSON.stringify(options.body);
+
   const response = await fetch(`${apiBaseUrl}${path}`, {
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body,
     headers: {
-      ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(options.body === undefined
+        ? {}
+        : options.rawBody
+          ? {}
+          : { "Content-Type": "application/json" }),
+      ...(options.headers ?? {}),
       ...(options.token ? { Authorization: `Bearer ${options.token}` } : {})
     },
     method: options.method ?? "GET"
@@ -30,6 +45,15 @@ async function apiRequest<T>(
   }
 
   return (await response.json()) as T;
+}
+
+function createStripeSignatureHeader(payload: string, secret: string) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const digest = createHmac("sha256", secret)
+    .update(`${timestamp}.${payload}`)
+    .digest("hex");
+
+  return `t=${timestamp},v1=${digest}`;
 }
 
 test.afterAll(async () => {
@@ -53,6 +77,8 @@ test("dashboard list, details, analytics, and settings use live API data", async
   const password = "StrongPass123!";
   const activeTitle = `Alpha Dashboard ${suffix}`;
   const inactiveTitle = `Dormant Dashboard ${suffix}`;
+  const fillerTitle = `Quota Filler ${suffix}`;
+  const premiumTitle = `Premium Dashboard ${suffix}`;
 
   const registration = await apiRequest<{
     accessToken: string;
@@ -197,6 +223,22 @@ test("dashboard list, details, analytics, and settings use live API data", async
       redirect: "manual"
     });
 
+    await apiRequest("/qr-codes", {
+      body: {
+        content: {
+          link: "https://example.com/dashboard-quota-filler"
+        },
+        design,
+        exports: ["png", "svg"],
+        settings,
+        title: fillerTitle,
+        type: "link",
+        workspaceId: workspace.id
+      },
+      method: "POST",
+      token: registration.accessToken
+    });
+
     await page.getByRole("button", { name: "Refresh" }).click();
     await expect(page.getByTestId(`qr-row-${inactiveQr.id}`)).toBeVisible();
   });
@@ -258,10 +300,141 @@ test("dashboard list, details, analytics, and settings use live API data", async
     await expect(page.getByTestId("analytics-view")).toContainText("REDIRECTED");
   });
 
+  await test.step("show the current free plan and enforce the free QR limit", async () => {
+    await page.getByRole("link", { name: "Billing" }).click();
+    await expect(page).toHaveURL(`${appUrl}/dashboard/billing`);
+    await expect(page.getByTestId("billing-view")).toBeVisible();
+    await expect(page.getByTestId("billing-summary")).toContainText("Free");
+    await expect(page.getByTestId("billing-summary")).toContainText("3 / 3");
+
+    await page.getByRole("link", { name: "Create QR" }).click();
+    await expect(page).toHaveURL(`${appUrl}/generator`);
+    await page.getByTestId("generator-title").fill(`Blocked ${suffix}`);
+    await page.getByTestId("generator-link").fill("https://example.com/free-limit-blocked");
+    await page.getByTestId("generator-submit").click();
+    await expect(page.getByTestId("generator-view")).toContainText(
+      "Free allows up to 3 active QR codes. Upgrade to continue creating more."
+    );
+  });
+
+  await test.step("upgrade in billing test mode, sync webhooks, and unlock more capacity", async () => {
+    await page.goto(`${appUrl}/dashboard/billing`);
+    await expect(page.getByTestId("billing-view")).toBeVisible();
+    await page.getByTestId("billing-select-premium").click();
+    await expect(page).toHaveURL(/\/dashboard\/billing\?checkout_session_id=/);
+    await expect(page.getByTestId("billing-checkout-return")).toBeVisible();
+
+    const checkoutSessionId = new URL(page.url()).searchParams.get("checkout_session_id");
+    expect(checkoutSessionId).toBeTruthy();
+
+    const checkoutSummary = await apiRequest<{
+      currentPlan: { code: string };
+    }>(`/billing/summary?workspaceId=${workspace.id}`, {
+      token: registration.accessToken
+    });
+    expect(checkoutSummary.currentPlan.code).toBe("free");
+
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim() || "whsec_mock";
+    const checkoutCompletedPayload = JSON.stringify({
+      id: "evt_checkout_completed_browser",
+      object: "event",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          client_reference_id: workspace.id,
+          customer: `cus_test_mock_${suffix}`,
+          id: checkoutSessionId,
+          metadata: {
+            targetPlan: "premium",
+            userId: registration.user.id,
+            workspaceId: workspace.id
+          },
+          mode: "subscription",
+          object: "checkout.session",
+          subscription: `sub_test_mock_${suffix}`
+        }
+      }
+    });
+    const subscriptionUpdatedPayload = JSON.stringify({
+      id: "evt_subscription_updated_browser",
+      object: "event",
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          cancel_at_period_end: false,
+          current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+          customer: `cus_test_mock_${suffix}`,
+          id: `sub_test_mock_${suffix}`,
+          items: {
+            data: [
+              {
+                price: {
+                  id: process.env.STRIPE_PRICE_PREMIUM?.trim() || "price_premium_test"
+                }
+              }
+            ]
+          },
+          metadata: {
+            targetPlan: "premium",
+            userId: registration.user.id,
+            workspaceId: workspace.id
+          },
+          object: "subscription",
+          status: "active"
+        }
+      }
+    });
+    const invoicePaidPayload = JSON.stringify({
+      id: "evt_invoice_paid_browser",
+      object: "event",
+      type: "invoice.paid",
+      data: {
+        object: {
+          amount_due: 4900,
+          created: Math.floor(Date.now() / 1000),
+          currency: "usd",
+          id: `in_test_${suffix}`,
+          object: "invoice",
+          status: "paid",
+          subscription: `sub_test_mock_${suffix}`
+        }
+      }
+    });
+
+    for (const payload of [
+      checkoutCompletedPayload,
+      subscriptionUpdatedPayload,
+      invoicePaidPayload
+    ]) {
+      await apiRequest("/billing/webhooks/stripe", {
+        body: payload,
+        headers: {
+          "Content-Type": "application/json",
+          "Stripe-Signature": createStripeSignatureHeader(payload, webhookSecret)
+        },
+        method: "POST"
+        ,
+        rawBody: true
+      });
+    }
+
+    await page.reload();
+    await expect(page.getByTestId("billing-summary")).toContainText("Premium");
+    await expect(page.getByTestId("billing-summary")).toContainText("3 / 250");
+    await expect(page.getByTestId("billing-invoices-table")).toContainText("paid");
+
+    await page.getByRole("link", { name: "Create QR" }).click();
+    await expect(page).toHaveURL(`${appUrl}/generator`);
+    await page.getByTestId("generator-title").fill(premiumTitle);
+    await page.getByTestId("generator-link").fill("https://example.com/premium-after-upgrade");
+    await page.getByTestId("generator-submit").click();
+    await expect(page.getByTestId("generator-created-result")).toContainText(premiumTitle);
+  });
+
   await test.step("open settings and update the real profile", async () => {
     const updatedName = `Dashboard Updated ${suffix}`;
 
-    await page.getByRole("link", { name: "Profile & settings" }).click();
+    await page.goto(`${appUrl}/dashboard/settings`);
     await expect(page).toHaveURL(`${appUrl}/dashboard/settings`);
     await expect(page.getByTestId("settings-view")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Profile & settings" })).toBeVisible();

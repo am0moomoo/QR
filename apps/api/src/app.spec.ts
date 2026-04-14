@@ -45,6 +45,33 @@ const analytics = {
   }
 };
 
+function createBillingStub() {
+  return {
+    async applyQrSettingsForPlan(_workspaceId: string, settings: Record<string, unknown>) {
+      return settings;
+    },
+    async enforceQrCreateAllowed() {
+      return {
+        plan: "free",
+        usage: {
+          qrCodesUsed: 0,
+          storageBytesUsed: 0
+        }
+      };
+    },
+    async enforceStorageQuota() {
+      return {
+        limit: 1024 * 1024,
+        plan: "free",
+        usage: {
+          qrCodesUsed: 0,
+          storageBytesUsed: 0
+        }
+      };
+    }
+  };
+}
+
 function createSlugCache() {
   const values = new Map<string, unknown>();
 
@@ -406,7 +433,8 @@ test("QrCodesService.create renders real download assets and returns stable shor
     assetPipeline as any,
     renderQueue as any,
     analytics as any,
-    logger as any
+    logger as any,
+    createBillingStub() as any
   );
   const result = await service.create("user-1", {
     content: { link: "https://example.com/spring" },

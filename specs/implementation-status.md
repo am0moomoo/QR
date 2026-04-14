@@ -69,12 +69,12 @@ Update this file after each major Codex pass.
 - [x] dashboard e2e smoke
 
 ## Billing
-- [ ] plans
-- [ ] Stripe checkout
-- [ ] Stripe webhooks
-- [ ] entitlements
-- [ ] quotas
-- [ ] invoices UI
+- [x] plans
+- [x] Stripe checkout
+- [x] Stripe webhooks
+- [x] entitlements
+- [x] quotas
+- [x] invoices UI
 
 ## API and integrations
 - [ ] API keys
@@ -103,7 +103,17 @@ Update this file after each major Codex pass.
 - [~] worker separation from API runtime
 
 ## Verification truth
+- locally verified:
+  - observed in this session: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm --filter @qr/api test:integration`, and `pnpm test:dashboard:e2e`
+  - exact API billing/quota smoke observed green in deterministic test mode: `register -> login -> create QR -> render PNG/SVG -> download -> billing summary on free -> ads-off gate denied on free -> free QR limit denied at 3/3 -> checkout session creation -> signed webhook sync -> premium plan applied -> invoice synced -> premium ads-off QR allowed -> storage quota denied -> forgot/reset password -> profile update`
+  - exact browser billing/product smoke observed green in deterministic test mode: `sign in -> empty QR list -> create link QR -> list/details/download/analytics -> billing page shows Free 3/3 -> free-limit create blocked -> checkout return -> signed webhook sync -> billing page shows Premium + invoice -> premium create unlocked -> profile update -> duplicate -> archive -> delete -> logout`
 - CI-verified:
+  - current monetization/billing slice on this working copy is not yet observed in GitHub Actions; the most recent billing truth in this file is still local-only until a new run is observed on the updated branch head
+  - GitHub Actions run `ci #28` (`24362078223`) succeeded on commit `e63c9ced7978fd2a338830c2c8523d04b2b27218`
+  - passed jobs on `ci #28`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
+  - observed skipped jobs on `ci #28`: `verify-real-bucket`, `verify-staging-smoke`
+  - observed `verify` step success on `ci #28` for `Build`, `Lint`, `Typecheck`, `Apply migrations`, `Seed database`, `API unit tests`, `API integration smoke`, `Install Playwright browser`, and `Dashboard end-to-end smoke`
+  - exact usable-product UI flow observed green on `ci #28`: `sign in -> empty QR list -> create link QR from generator -> QR appears in dashboard list -> refresh restores session -> QR details -> PNG download -> analytics -> profile update -> duplicate -> archive -> delete -> logout -> protected route returns to auth form`
   - GitHub Actions run `ci #26` (`24360011778`) succeeded on commit `a301422f3f32e25618509896f6c84bd4520f2774`
   - passed jobs on `ci #26`: `detect-optional-verifiers`, `verify`, `verify-bullmq-runtime`
   - observed skipped jobs on `ci #26`: `verify-staging-smoke`, `verify-real-bucket`
@@ -136,11 +146,17 @@ Update this file after each major Codex pass.
   - no observed S3/R2 verification yet for upload/download/render lifecycle, signed URL policy, or orphan cleanup against a real bucket
   - the repo still needs real staging variables and real bucket secrets configured before GitHub Actions can move those optional jobs from `skipped` to observed execution
   - staging smoke currently requires an explicit `STAGING_SMOKE_WORKSPACE_ID` because workspace listing/management is intentionally still out of scope
-  - billing, quotas, and Stripe flows remain intentionally untouched until staging truth exists
+  - billing is now verified only in deterministic mock/test mode; a live Stripe test account, hosted checkout, and externally delivered webhook run are still unobserved
+
+## Billing gaps
+- live Stripe test-mode checkout and webhook delivery against Stripe-hosted infrastructure are still unverified; current billing truth uses the deterministic mock Stripe-compatible mode
+- downgrade scheduling, proration, failed-payment recovery, and cancel-at-period-end UX are not yet covered by browser smoke
+- enterprise plan handling and non-self-serve sales flow are still placeholders
+- quota coverage is currently observed for `ads off`, QR-count limits, and storage limits only; API-access quotas and retention enforcement remain incomplete
 
 ## UI shipped vs backend-capable
-- shipped in UI: sign in, session restore across refresh, logout, generator create flow, QR list, QR details, analytics, profile/settings, QR management actions (`download`, `duplicate`, `archive`, `delete`)
-- backend-capable only: Google OAuth, billing, API keys, webhooks, custom domains, folders/workspaces
+- shipped in UI: sign in, session restore across refresh, logout, generator create flow, QR list, QR details, analytics, profile/settings, QR management actions (`download`, `duplicate`, `archive`, `delete`), billing page with plan summary/quota usage/invoice history, and upgrade/downgrade entry points in deterministic test mode
+- backend-capable only: Google OAuth, API keys, webhooks, custom domains, folders/workspaces
 - intentionally not started in UI: billing polish, bulk import, folders/workspaces, custom domains, visual polish
 
 ## Notes

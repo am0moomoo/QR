@@ -2,6 +2,7 @@ import * as assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import * as path from "node:path";
+import { createHmac } from "node:crypto";
 import test = require("node:test");
 import {
   RequestMethod,
@@ -27,6 +28,13 @@ process.env.NODE_ENV = "test";
 process.env.SCAN_WRITE_SYNC = "true";
 process.env.STORAGE_DRIVER = "local";
 process.env.STORAGE_LOCAL_ROOT = "./storage/test-integration";
+process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "sk_test_mock";
+process.env.STRIPE_WEBHOOK_SECRET =
+  process.env.STRIPE_WEBHOOK_SECRET || "whsec_mock";
+process.env.STRIPE_PRICE_LITE =
+  process.env.STRIPE_PRICE_LITE || "price_lite_test";
+process.env.STRIPE_PRICE_PREMIUM =
+  process.env.STRIPE_PRICE_PREMIUM || "price_premium_test";
 
 const storageRoot = path.resolve(
   process.cwd(),
@@ -146,7 +154,16 @@ function textParser(
   });
 }
 
-test("integration smoke: register -> login -> create link QR -> list -> get -> download -> scan -> analytics -> forgot/reset -> profile", async (t) => {
+function createStripeSignatureHeader(payload: string, secret: string) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const digest = createHmac("sha256", secret)
+    .update(`${timestamp}.${payload}`)
+    .digest("hex");
+
+  return `t=${timestamp},v1=${digest}`;
+}
+
+test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -> profile", async (t) => {
   if (!(await ensureIntegrationReady(t))) {
     return;
   }
@@ -213,6 +230,51 @@ test("integration smoke: register -> login -> create link QR -> list -> get -> d
       assert.equal(body.fullName, "Owner Example");
     });
 
+  const initialBillingSummary = await request(server)
+    .get(`/api/v1/billing/summary?workspaceId=${workspace.id}`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(200);
+
+  assert.equal(initialBillingSummary.body.currentPlan.code, "free");
+  assert.equal(initialBillingSummary.body.quotas.qrCodes.limit, 3);
+  assert.equal(initialBillingSummary.body.subscription, null);
+
+  await request(server)
+    .post("/api/v1/qr-codes")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      content: {
+        link: "https://example.com/ads-off-not-allowed"
+      },
+      design: {
+        backgroundColor: "#ffffff",
+        cornersInner: "square",
+        cornersInnerColor: "#111111",
+        cornersOuter: "square",
+        cornersOuterColor: "#111111",
+        errorCorrection: "M",
+        logoAssetId: null,
+        logoHideBg: true,
+        pattern: "square",
+        patternColor: "#111111",
+        quietZoneModules: 4,
+        sizePx: 512
+      },
+      exports: ["png", "svg"],
+      settings: {
+        adsEnabled: false,
+        doNotIndex: false,
+        expiresAt: null,
+        isOneTime: false,
+        maxScans: null,
+        password: null
+      },
+      title: "Ads off should fail on free",
+      type: "link",
+      workspaceId: workspace.id
+    })
+    .expect(403);
+
   const createQr = await request(server)
     .post("/api/v1/qr-codes")
     .set("Authorization", `Bearer ${bearerToken}`)
@@ -271,6 +333,80 @@ test("integration smoke: register -> login -> create link QR -> list -> get -> d
       assert.equal(body.content.link, "https://example.com/launch");
       assert.equal(body.downloads.length, 2);
     });
+
+  for (const [index, title] of ["Second QR", "Third QR"].entries()) {
+    await request(server)
+      .post("/api/v1/qr-codes")
+      .set("Authorization", `Bearer ${bearerToken}`)
+      .send({
+        content: {
+          link: `https://example.com/free-limit-${index + 2}`
+        },
+        design: {
+          backgroundColor: "#ffffff",
+          cornersInner: "square",
+          cornersInnerColor: "#111111",
+          cornersOuter: "square",
+          cornersOuterColor: "#111111",
+          errorCorrection: "M",
+          logoAssetId: null,
+          logoHideBg: true,
+          pattern: "square",
+          patternColor: "#111111",
+          quietZoneModules: 4,
+          sizePx: 512
+        },
+        exports: ["png", "svg"],
+        settings: {
+          adsEnabled: true,
+          doNotIndex: false,
+          expiresAt: null,
+          isOneTime: false,
+          maxScans: null,
+          password: null
+        },
+        title,
+        type: "link",
+        workspaceId: workspace.id
+      })
+      .expect(201);
+  }
+
+  await request(server)
+    .post("/api/v1/qr-codes")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      content: {
+        link: "https://example.com/free-limit-blocked"
+      },
+      design: {
+        backgroundColor: "#ffffff",
+        cornersInner: "square",
+        cornersInnerColor: "#111111",
+        cornersOuter: "square",
+        cornersOuterColor: "#111111",
+        errorCorrection: "M",
+        logoAssetId: null,
+        logoHideBg: true,
+        pattern: "square",
+        patternColor: "#111111",
+        quietZoneModules: 4,
+        sizePx: 512
+      },
+      exports: ["png", "svg"],
+      settings: {
+        adsEnabled: true,
+        doNotIndex: false,
+        expiresAt: null,
+        isOneTime: false,
+        maxScans: null,
+        password: null
+      },
+      title: "Free limit blocked",
+      type: "link",
+      workspaceId: workspace.id
+    })
+    .expect(403);
 
   await request(server)
     .post(`/api/v1/qr-codes/${createQr.body.id}/render`)
@@ -358,6 +494,206 @@ test("integration smoke: register -> login -> create link QR -> list -> get -> d
   assert.equal(analyticsResponse.body.summary.uniqueIps, 1);
   assert.equal(analyticsResponse.body.daily.length, 1);
   assert.equal(analyticsResponse.body.recentEvents[0].outcome, "REDIRECTED");
+
+  const checkoutSession = await request(server)
+    .post("/api/v1/billing/checkout-session")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      targetPlan: "premium",
+      workspaceId: workspace.id
+    })
+    .expect(201);
+
+  assert.equal(checkoutSession.body.providerMode, "mock");
+  assert.equal(checkoutSession.body.targetPlan, "premium");
+  assert.match(checkoutSession.body.checkoutSessionId, /^cs_test_mock_/);
+
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "whsec_mock";
+  const checkoutCompletedPayload = JSON.stringify({
+    id: "evt_checkout_completed",
+    object: "event",
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        client_reference_id: workspace.id,
+        customer: checkoutSession.body.stripeCustomerId,
+        id: checkoutSession.body.checkoutSessionId,
+        metadata: {
+          targetPlan: "premium",
+          userId: registration.body.user.id,
+          workspaceId: workspace.id
+        },
+        mode: "subscription",
+        object: "checkout.session",
+        subscription: checkoutSession.body.subscriptionId
+      }
+    }
+  });
+  const subscriptionUpdatedPayload = JSON.stringify({
+    id: "evt_subscription_updated",
+    object: "event",
+    type: "customer.subscription.updated",
+    data: {
+      object: {
+        cancel_at_period_end: false,
+        current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+        customer: checkoutSession.body.stripeCustomerId,
+        id: checkoutSession.body.subscriptionId,
+        items: {
+          data: [
+            {
+              price: {
+                id: process.env.STRIPE_PRICE_PREMIUM
+              }
+            }
+          ]
+        },
+        metadata: {
+          targetPlan: "premium",
+          userId: registration.body.user.id,
+          workspaceId: workspace.id
+        },
+        object: "subscription",
+        status: "active"
+      }
+    }
+  });
+  const invoicePaidPayload = JSON.stringify({
+    id: "evt_invoice_paid",
+    object: "event",
+    type: "invoice.paid",
+    data: {
+      object: {
+        amount_due: 4900,
+        created: Math.floor(Date.now() / 1000),
+        currency: "usd",
+        id: "in_test_premium",
+        object: "invoice",
+        status: "paid",
+        subscription: checkoutSession.body.subscriptionId
+      }
+    }
+  });
+
+  for (const payload of [
+    checkoutCompletedPayload,
+    subscriptionUpdatedPayload,
+    invoicePaidPayload
+  ]) {
+    await request(server)
+      .post("/api/v1/billing/webhooks/stripe")
+      .set(
+        "Stripe-Signature",
+        createStripeSignatureHeader(payload, webhookSecret)
+      )
+      .set("Content-Type", "application/json")
+      .send(payload)
+      .expect(200)
+      .expect(({ body }: { body: Record<string, unknown> }) => {
+        assert.equal(body.received, true);
+      });
+  }
+
+  const premiumBillingSummary = await request(server)
+    .get(`/api/v1/billing/summary?workspaceId=${workspace.id}`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(200);
+
+  assert.equal(premiumBillingSummary.body.currentPlan.code, "premium");
+  assert.equal(premiumBillingSummary.body.subscription.status, "active");
+  assert.equal(premiumBillingSummary.body.invoices.length, 1);
+
+  const premiumQr = await request(server)
+    .post("/api/v1/qr-codes")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      content: {
+        link: "https://example.com/premium-ads-off"
+      },
+      design: {
+        backgroundColor: "#ffffff",
+        cornersInner: "square",
+        cornersInnerColor: "#111111",
+        cornersOuter: "square",
+        cornersOuterColor: "#111111",
+        errorCorrection: "M",
+        logoAssetId: null,
+        logoHideBg: true,
+        pattern: "square",
+        patternColor: "#111111",
+        quietZoneModules: 4,
+        sizePx: 512
+      },
+      exports: ["png", "svg"],
+      settings: {
+        adsEnabled: false,
+        doNotIndex: false,
+        expiresAt: null,
+        isOneTime: false,
+        maxScans: null,
+        password: null
+      },
+      title: "Premium ads off",
+      type: "link",
+      workspaceId: workspace.id
+    })
+    .expect(201);
+
+  await request(server)
+    .get(`/api/v1/qr-codes/${premiumQr.body.id}`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(200)
+    .expect(({ body }: { body: Record<string, any> }) => {
+      assert.equal(body.adsEnabled, false);
+    });
+
+  await prisma!.qRAsset.create({
+    data: {
+      bytes: BigInt(250 * 1024 * 1024),
+      checksum: "quota-checksum",
+      format: "PNG",
+      kind: "QR_IMAGE",
+      qrCodeId: premiumQr.body.id,
+      storageKey: `quota/${premiumQr.body.id}/existing.png`,
+      workspaceId: workspace.id
+    }
+  });
+
+  await request(server)
+    .post("/api/v1/qr-codes")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      content: {
+        link: "https://example.com/storage-limit"
+      },
+      design: {
+        backgroundColor: "#ffffff",
+        cornersInner: "square",
+        cornersInnerColor: "#111111",
+        cornersOuter: "square",
+        cornersOuterColor: "#111111",
+        errorCorrection: "M",
+        logoAssetId: null,
+        logoHideBg: true,
+        pattern: "square",
+        patternColor: "#111111",
+        quietZoneModules: 4,
+        sizePx: 512
+      },
+      exports: ["png", "svg"],
+      settings: {
+        adsEnabled: false,
+        doNotIndex: false,
+        expiresAt: null,
+        isOneTime: false,
+        maxScans: null,
+        password: null
+      },
+      title: "Storage limited",
+      type: "link",
+      workspaceId: workspace.id
+    })
+    .expect(403);
 
   const forgotPassword = await request(server)
     .post("/api/v1/auth/forgot-password")

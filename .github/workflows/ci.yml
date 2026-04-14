@@ -60,6 +60,10 @@ jobs:
       SCAN_WRITE_SYNC: "true"
       SESSION_TTL_HOURS: "720"
       SHORT_DOMAIN: http://localhost:4000
+      STRIPE_PRICE_LITE: price_lite_test
+      STRIPE_PRICE_PREMIUM: price_premium_test
+      STRIPE_SECRET_KEY: sk_test_mock
+      STRIPE_WEBHOOK_SECRET: whsec_mock
       STORAGE_DRIVER: local
       STORAGE_LOCAL_ROOT: ./storage/ci
     services:

@@ -98,6 +98,33 @@ export function formatBytes(value: string | null) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+export function formatBytesNumber(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function formatCurrencyCents(value: number) {
+  if (value <= 0) {
+    return "Free";
+  }
+
+  return new Intl.NumberFormat("en", {
+    currency: "USD",
+    style: "currency"
+  }).format(value / 100);
+}
+
 export function normalizeFieldValue(value: string) {
   const trimmed = value.trim();
   return trimmed.length === 0 ? null : trimmed;

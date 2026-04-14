@@ -1,8 +1,10 @@
 import type { DashboardUser } from "../../lib/dashboard-api";
 
-export type DashboardSection = "analytics" | "details" | "list" | "settings";
+export type DashboardSection = "analytics" | "billing" | "details" | "list" | "settings";
 
 export type DashboardShellProps = {
+  checkoutCanceled?: boolean;
+  checkoutSessionId?: string | null;
   initialAnalyticsQrId?: string | null;
   qrId?: string;
   section: DashboardSection;

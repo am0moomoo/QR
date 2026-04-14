@@ -28,6 +28,12 @@ export function DashboardNavigation({
         Analytics
       </Link>
       <Link
+        className={section === "billing" ? "dashboard-nav-link active" : "dashboard-nav-link"}
+        href={"/dashboard/billing" as Route}
+      >
+        Billing
+      </Link>
+      <Link
         className={section === "settings" ? "dashboard-nav-link active" : "dashboard-nav-link"}
         href={"/dashboard/settings" as Route}
       >

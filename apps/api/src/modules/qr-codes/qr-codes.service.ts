@@ -34,6 +34,7 @@ import { StorageService } from "../../common/storage.service";
 import { StructuredLoggerService } from "../../common/structured-logger.service";
 import { TelemetryService } from "../../common/telemetry.service";
 import { parseWithSchema } from "../../common/zod.util";
+import { BillingService } from "../billing/billing.service";
 
 const listQrCodesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -75,7 +76,8 @@ export class QrCodesService {
     private readonly assetPipeline: QrAssetPipelineService,
     private readonly renderQueue: RenderQueueService,
     private readonly analytics: AnalyticsService,
-    private readonly logger: StructuredLoggerService
+    private readonly logger: StructuredLoggerService,
+    private readonly billing: BillingService
   ) {}
 
   async list(userId: string, query: unknown) {
@@ -133,11 +135,16 @@ export class QrCodesService {
       const design = qrDesignSchema.parse(input.design ?? {});
       const settings = qrSettingsSchema.parse(input.settings ?? {});
       const workspace = await this.requireWorkspaceAccess(input.workspaceId, userId);
+      await this.billing.enforceQrCreateAllowed(workspace.id);
+      const effectiveSettings = await this.billing.applyQrSettingsForPlan(
+        workspace.id,
+        settings
+      );
       const content = validateQrContent(input.type, input.content);
       const targetUrl = getQrTargetUrl(input.type, content);
       const slug = await this.generateUniqueSlug();
-      const passwordHash = settings.password
-        ? await hash(settings.password, 12)
+      const passwordHash = effectiveSettings.password
+        ? await hash(effectiveSettings.password, 12)
         : null;
 
       if (input.folderId) {
@@ -147,12 +154,14 @@ export class QrCodesService {
       const qrCode = await this.prisma.$transaction(async (tx) => {
         const created = await tx.qRCode.create({
           data: {
-            adsEnabled: settings.adsEnabled,
-            doNotIndex: settings.doNotIndex,
-            expiresAt: settings.expiresAt ? new Date(settings.expiresAt) : null,
+            adsEnabled: effectiveSettings.adsEnabled,
+            doNotIndex: effectiveSettings.doNotIndex,
+            expiresAt: effectiveSettings.expiresAt
+              ? new Date(effectiveSettings.expiresAt)
+              : null,
             folderId: input.folderId,
-            isOneTime: settings.isOneTime,
-            maxScans: settings.maxScans,
+            isOneTime: effectiveSettings.isOneTime,
+            maxScans: effectiveSettings.maxScans,
             ownerUserId: userId,
             passwordHash,
             slug,
@@ -205,6 +214,12 @@ export class QrCodesService {
         input.exports ?? ["png", "svg"],
         qrCode.updatedAt.toISOString()
       );
+      try {
+        await this.billing.enforceStorageQuota(createdQr.workspaceId);
+      } catch (error) {
+        await this.remove(userId, createdQr.id);
+        throw error;
+      }
 
       await this.slugCache.set(createdQr.slug, createdQr);
       this.telemetry.track("qr.created", {
@@ -246,33 +261,52 @@ export class QrCodesService {
       ? qrDesignSchema.parse(input.design)
       : existingQr.design;
     const designChanged = Boolean(input.design);
+    const nextSettings = input.settings
+      ? await this.billing.applyQrSettingsForPlan(existingQr.workspaceId, {
+          adsEnabled: input.settings.adsEnabled ?? existingQr.adsEnabled,
+          doNotIndex: input.settings.doNotIndex ?? existingQr.doNotIndex,
+          expiresAt:
+            input.settings.expiresAt !== undefined
+              ? input.settings.expiresAt
+              : existingQr.expiresAt?.toISOString() ?? null,
+          isOneTime: input.settings.isOneTime ?? existingQr.isOneTime,
+          maxScans:
+            input.settings.maxScans !== undefined
+              ? input.settings.maxScans
+              : existingQr.maxScans,
+          password:
+            "password" in input.settings
+              ? input.settings.password ?? null
+              : null
+        })
+      : null;
     const passwordHash =
-      input.settings && "password" in input.settings
-        ? input.settings.password
-          ? await hash(input.settings.password, 12)
+      nextSettings && input.settings && "password" in input.settings
+        ? nextSettings.password
+          ? await hash(nextSettings.password, 12)
           : null
         : existingQr.passwordHash;
 
     const updatedQr = await this.prisma.$transaction(async (tx) => {
-      await tx.qRCode.update({
-        where: { id },
-        data: {
-          adsEnabled: input.settings?.adsEnabled ?? existingQr.adsEnabled,
-          doNotIndex: input.settings?.doNotIndex ?? existingQr.doNotIndex,
-          expiresAt:
-            input.settings?.expiresAt !== undefined
-              ? input.settings.expiresAt
-                ? new Date(input.settings.expiresAt)
-                : null
-              : existingQr.expiresAt,
-          folderId:
-            input.folderId !== undefined ? input.folderId : existingQr.folderId,
-          isOneTime: input.settings?.isOneTime ?? existingQr.isOneTime,
-          maxScans:
-            input.settings?.maxScans !== undefined
-              ? input.settings.maxScans
-              : existingQr.maxScans,
-          passwordHash,
+        await tx.qRCode.update({
+          where: { id },
+          data: {
+            adsEnabled: nextSettings?.adsEnabled ?? existingQr.adsEnabled,
+            doNotIndex: nextSettings?.doNotIndex ?? existingQr.doNotIndex,
+            expiresAt:
+              nextSettings?.expiresAt !== undefined
+                ? nextSettings.expiresAt
+                  ? new Date(nextSettings.expiresAt)
+                  : null
+                : existingQr.expiresAt,
+            folderId:
+              input.folderId !== undefined ? input.folderId : existingQr.folderId,
+            isOneTime: nextSettings?.isOneTime ?? existingQr.isOneTime,
+            maxScans:
+              nextSettings?.maxScans !== undefined
+                ? nextSettings.maxScans
+                : existingQr.maxScans,
+            passwordHash,
           title: input.title !== undefined ? input.title : existingQr.title
         }
       });
@@ -497,6 +531,7 @@ export class QrCodesService {
 
   async duplicate(userId: string, id: string) {
     const qrCode = await this.requireQrCodeAccess(id, userId);
+    await this.billing.enforceQrCreateAllowed(qrCode.workspaceId);
     const slug = await this.generateUniqueSlug();
 
     const duplicated = await this.prisma.$transaction(async (tx) => {
@@ -564,6 +599,12 @@ export class QrCodesService {
       this.assetPipeline.getExistingExportFormats(qrCode),
       duplicated.updatedAt.toISOString()
     );
+    try {
+      await this.billing.enforceStorageQuota(duplicatedQr.workspaceId);
+    } catch (error) {
+      await this.remove(userId, duplicatedQr.id);
+      throw error;
+    }
 
     await this.slugCache.set(duplicatedQr.slug, duplicatedQr);
     this.telemetry.track("qr.duplicated", {

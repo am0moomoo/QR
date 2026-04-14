@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const planNames = ["free", "lite", "premium", "enterprise"] as const;
+export const billingPlanCodes = ["free", "lite", "premium"] as const;
 export const qrStatuses = ["ACTIVE", "INACTIVE", "ARCHIVED", "DELETED"] as const;
 export const exportFormats = ["png", "svg"] as const;
 export const qrTypes = [
@@ -25,9 +26,86 @@ export const qrTypes = [
 ] as const;
 
 export type PlanName = (typeof planNames)[number];
+export type BillingPlanCode = (typeof billingPlanCodes)[number];
 export type QrStatus = (typeof qrStatuses)[number];
 export type ExportFormat = (typeof exportFormats)[number];
 export type QrType = (typeof qrTypes)[number];
+
+type PlanFeatureCatalogItem = {
+  adsControl: boolean;
+  analyticsRetentionDays: number;
+  apiAccess: boolean;
+  invoiceHistory: boolean;
+  monthlyPriceCents: number;
+  name: string;
+  storageQuotaBytes: number;
+  summary: string;
+  supportsPrioritySupport: boolean;
+  supportsWhiteLabel: boolean;
+  targetAudience: string;
+  maxQrCodes: number;
+};
+
+const MB = 1024 * 1024;
+
+export const billingPlanCatalog = {
+  enterprise: {
+    adsControl: true,
+    analyticsRetentionDays: 730,
+    apiAccess: true,
+    invoiceHistory: true,
+    monthlyPriceCents: 19900,
+    maxQrCodes: 5000,
+    name: "Enterprise",
+    storageQuotaBytes: 5_000 * MB,
+    summary: "High-volume QR operations with custom support and generous limits.",
+    supportsPrioritySupport: true,
+    supportsWhiteLabel: true,
+    targetAudience: "Large teams and partner deployments"
+  },
+  free: {
+    adsControl: false,
+    analyticsRetentionDays: 14,
+    apiAccess: false,
+    invoiceHistory: false,
+    monthlyPriceCents: 0,
+    maxQrCodes: 3,
+    name: "Free",
+    storageQuotaBytes: 512 * 1024,
+    summary: "A starter plan for a few live QR codes with ads enabled on scan flows.",
+    supportsPrioritySupport: false,
+    supportsWhiteLabel: false,
+    targetAudience: "Individuals validating the product"
+  },
+  lite: {
+    adsControl: false,
+    analyticsRetentionDays: 90,
+    apiAccess: false,
+    invoiceHistory: true,
+    monthlyPriceCents: 1900,
+    maxQrCodes: 25,
+    name: "Lite",
+    storageQuotaBytes: 20 * MB,
+    summary: "More QR capacity and billing history for growing campaigns.",
+    supportsPrioritySupport: false,
+    supportsWhiteLabel: false,
+    targetAudience: "Small teams and active campaigns"
+  },
+  premium: {
+    adsControl: true,
+    analyticsRetentionDays: 365,
+    apiAccess: true,
+    invoiceHistory: true,
+    monthlyPriceCents: 4900,
+    maxQrCodes: 250,
+    name: "Premium",
+    storageQuotaBytes: 250 * MB,
+    summary: "Full commercial plan with ads control, API access, and long retention.",
+    supportsPrioritySupport: true,
+    supportsWhiteLabel: true,
+    targetAudience: "Businesses managing many QR assets"
+  }
+} satisfies Record<PlanName, PlanFeatureCatalogItem>;
 
 const hexColorSchema = z
   .string()
@@ -62,6 +140,21 @@ export const updateProfileSchema = z.object({
   avatarUrl: z.union([z.string().trim().url(), z.null()]).optional(),
   fullName: z.union([z.string().trim().min(1).max(120), z.null()]).optional(),
   locale: z.string().trim().min(2).max(16).optional()
+});
+
+export const billingSummaryQuerySchema = z.object({
+  workspaceId: z.string().uuid().optional()
+});
+
+export const createCheckoutSessionSchema = z.object({
+  cancelUrl: z.string().trim().url().optional(),
+  successUrl: z.string().trim().url().optional(),
+  targetPlan: z.enum(["lite", "premium"]),
+  workspaceId: z.string().uuid()
+});
+
+export const cancelSubscriptionSchema = z.object({
+  workspaceId: z.string().uuid()
 });
 
 export const qrDesignSchema = z
@@ -213,6 +306,9 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+export type BillingSummaryQuery = z.infer<typeof billingSummaryQuerySchema>;
+export type CreateCheckoutSessionInput = z.infer<typeof createCheckoutSessionSchema>;
+export type CancelSubscriptionInput = z.infer<typeof cancelSubscriptionSchema>;
 export type QrDesignInput = z.infer<typeof qrDesignSchema>;
 export type QrSettingsInput = z.infer<typeof qrSettingsSchema>;
 export type CreateQrCodeInput = z.infer<typeof createQrCodeSchema>;

@@ -94,6 +94,87 @@ export type DashboardAnalyticsResponse = {
   summary: DashboardAnalyticsSummary;
 };
 
+export type DashboardBillingPlan = {
+  analyticsRetentionDays: number;
+  apiAccess: boolean;
+  code: "enterprise" | "free" | "lite" | "premium";
+  displayName: string;
+  features: {
+    adsControl: boolean;
+    apiAccess: boolean;
+    invoiceHistory: boolean;
+    prioritySupport: boolean;
+    whiteLabel: boolean;
+  };
+  limits: {
+    maxQrCodes: number;
+    storageQuotaBytes: number;
+  };
+  monthlyPriceCents: number;
+  priceId: string | null;
+  summary: string;
+  targetAudience: string;
+};
+
+export type DashboardBillingPlansResponse = {
+  items: DashboardBillingPlan[];
+  providerMode: "mock" | "stripe";
+};
+
+export type DashboardBillingSubscription = {
+  cancelAtPeriodEnd: boolean;
+  createdAt: string;
+  currentPeriodEnd: string | null;
+  id: string;
+  plan: "enterprise" | "free" | "lite" | "premium";
+  status: string;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  updatedAt: string;
+};
+
+export type DashboardBillingInvoice = {
+  amountCents: number | null;
+  createdAt: string;
+  currency: string | null;
+  id: string;
+  issuedAt: string | null;
+  status: string | null;
+  stripeInvoiceId: string | null;
+};
+
+export type DashboardBillingSummary = {
+  currentPlan: DashboardBillingPlan;
+  invoices: DashboardBillingInvoice[];
+  providerMode: "mock" | "stripe";
+  quotas: {
+    qrCodes: {
+      limit: number;
+      used: number;
+    };
+    storageBytes: {
+      limit: number;
+      used: number;
+    };
+  };
+  subscription: DashboardBillingSubscription | null;
+  workspace: {
+    id: string;
+    name: string;
+    plan: "enterprise" | "free" | "lite" | "premium";
+  };
+};
+
+export type DashboardCheckoutSession = {
+  checkoutSessionId: string;
+  providerMode: "mock" | "stripe";
+  stripeCustomerId: string | null;
+  subscriptionId: string | null;
+  targetPlan: "lite" | "premium";
+  url: string;
+  workspaceId: string;
+};
+
 type DashboardRequestOptions = {
   body?: unknown;
   headers?: HeadersInit;
@@ -337,6 +418,61 @@ export async function getDashboardQrAnalytics(
     `/qr-codes/${qrId}/analytics${queryString ? `?${queryString}` : ""}`,
     { token }
   );
+}
+
+export async function listDashboardBillingPlans() {
+  return dashboardRequest<DashboardBillingPlansResponse>("/billing/plans");
+}
+
+export async function getDashboardBillingSummary(
+  token: string,
+  workspaceId?: string
+) {
+  const searchParams = new URLSearchParams();
+
+  if (workspaceId) {
+    searchParams.set("workspaceId", workspaceId);
+  }
+
+  const queryString = searchParams.toString();
+  return dashboardRequest<DashboardBillingSummary>(
+    `/billing/summary${queryString ? `?${queryString}` : ""}`,
+    { token }
+  );
+}
+
+export async function createDashboardCheckoutSession(
+  token: string,
+  payload: {
+    cancelUrl?: string;
+    successUrl?: string;
+    targetPlan: "lite" | "premium";
+    workspaceId: string;
+  }
+) {
+  return dashboardRequest<DashboardCheckoutSession>("/billing/checkout-session", {
+    body: payload,
+    method: "POST",
+    token
+  });
+}
+
+export async function cancelDashboardSubscription(
+  token: string,
+  payload: {
+    workspaceId: string;
+  }
+) {
+  return dashboardRequest<{
+    canceled: boolean;
+    currentPlan: string;
+    mode: "mock" | "stripe";
+    scheduled: boolean;
+  }>("/billing/cancel-subscription", {
+    body: payload,
+    method: "POST",
+    token
+  });
 }
 
 export async function postDashboardQrAction(

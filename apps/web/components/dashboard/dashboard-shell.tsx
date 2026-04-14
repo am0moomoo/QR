@@ -2,6 +2,7 @@
 
 import { DashboardAuthPanel } from "./dashboard-auth-panel";
 import { AnalyticsView } from "./analytics-view";
+import { BillingView } from "./billing-view";
 import { DashboardNavigation } from "./dashboard-navigation";
 import { LoadingState } from "./dashboard-state";
 import { QrDetailsView } from "./qr-details-view";
@@ -11,6 +12,8 @@ import type { DashboardShellProps } from "./dashboard-types";
 import { useDashboardSession } from "./use-dashboard-session";
 
 export function DashboardShell({
+  checkoutCanceled,
+  checkoutSessionId,
   initialAnalyticsQrId,
   qrId,
   section
@@ -95,6 +98,14 @@ export function DashboardShell({
           <AnalyticsView
             initialQrId={initialAnalyticsQrId}
             token={authenticatedSession.token}
+          />
+        ) : null}
+        {section === "billing" ? (
+          <BillingView
+            checkoutCanceled={checkoutCanceled}
+            checkoutSessionId={checkoutSessionId}
+            token={authenticatedSession.token}
+            user={authenticatedSession.user}
           />
         ) : null}
         {section === "settings" ? (

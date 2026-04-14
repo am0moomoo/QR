@@ -5,6 +5,7 @@ import { HealthController } from "./modules/health/health.controller";
 import { QrCodesController } from "./modules/qr-codes/qr-codes.controller";
 import { ScanController } from "./modules/scan/scan.controller";
 import { BillingController } from "./modules/billing/billing.controller";
+import { BillingService } from "./modules/billing/billing.service";
 import { AuthController } from "./modules/auth/auth.controller";
 import { PrismaService } from "./common/prisma.service";
 import { QrAssetPipelineService } from "./common/qr-asset-pipeline.service";
@@ -53,6 +54,7 @@ import { ScanService } from "./modules/scan/scan.service";
     RenderQueueService,
     ScanEventQueueService,
     QueueRuntimeService,
+    BillingService,
     AuthService,
     QrCodesService,
     ScanService

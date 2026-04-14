@@ -44,6 +44,7 @@ Use `prompts/codex-master-prompt.md` first, then phase prompts one by one. Keep 
 - Smoke checklist: `specs/10_smoke_test_checklist.md`
 - Release checklist: `specs/11_release_checklist.md`
 - Known limitations: `specs/12_known_limitations.md`
+- Runtime deployment foundation: `deploy/runtime/README.md`
 
 ## Core verification commands
 

@@ -3,12 +3,22 @@ import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 import { configureApiApp } from "./bootstrap-api";
+import { StructuredLoggerService } from "./common/structured-logger.service";
+import { getNestLoggerLevels, getRuntimeSummary } from "./runtime-config";
 
 async function bootstrap() {
+  process.env.APP_ROLE = process.env.APP_ROLE ?? "api";
+
   const app = await NestFactory.create(AppModule, {
+    logger: getNestLoggerLevels(),
     rawBody: true
   });
   configureApiApp(app);
+  app.get(StructuredLoggerService).info(
+    "app.bootstrapped",
+    getRuntimeSummary(),
+    "bootstrap"
+  );
 
   const config = new DocumentBuilder()
     .setTitle("QRFlow API")

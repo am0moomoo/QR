@@ -1,6 +1,8 @@
-# Staging deployment
+# Future staging deployment target
 
-This target is the production-truth candidate for the current MVP. It keeps the queue worker separate from the API process, runs Prisma migrations before long-lived services, and is designed to use a private S3-compatible bucket such as AWS S3 or Cloudflare R2.
+This target is the future staging candidate for the current MVP. It keeps the queue worker separate from the API process, runs Prisma migrations before long-lived services, and is designed to use a private S3-compatible bucket such as AWS S3 or Cloudflare R2.
+
+The generic deployable runtime shape now lives in [deploy/runtime/README.md](C:/Users/aziz0/Desktop/qr-platform-starter/deploy/runtime/README.md). This staging target is still only prepared configuration until a real environment is actually deployed and observed.
 
 ## Topology
 

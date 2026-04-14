@@ -36,7 +36,7 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - .env.staging
+      - .env.runtime
     environment:
       APP_ROLE: migrate
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-qrflow}?schema=public
@@ -44,7 +44,6 @@ services:
       QUEUE_DRIVER: bullmq
       QUEUE_ROLE: producer
       REDIS_URL: redis://redis:6379
-      STORAGE_DRIVER: ${STORAGE_DRIVER}
     restart: "no"
     command: ["pnpm", "db:migrate:deploy"]
 
@@ -58,7 +57,7 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - .env.staging
+      - .env.runtime
     environment:
       APP_ROLE: api
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-qrflow}?schema=public
@@ -66,7 +65,6 @@ services:
       QUEUE_DRIVER: bullmq
       QUEUE_ROLE: producer
       REDIS_URL: redis://redis:6379
-      STORAGE_DRIVER: ${STORAGE_DRIVER}
     ports:
       - "4000:4000"
     restart: unless-stopped
@@ -95,7 +93,7 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - .env.staging
+      - .env.runtime
     environment:
       APP_ROLE: worker
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-qrflow}?schema=public
@@ -103,7 +101,6 @@ services:
       QUEUE_DRIVER: bullmq
       QUEUE_ROLE: both
       REDIS_URL: redis://redis:6379
-      STORAGE_DRIVER: ${STORAGE_DRIVER}
     restart: unless-stopped
     volumes:
       - storage_data:/app/storage
@@ -122,7 +119,7 @@ services:
       api:
         condition: service_healthy
     env_file:
-      - .env.staging
+      - .env.runtime
     environment:
       APP_ROLE: web
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}

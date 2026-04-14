@@ -19,6 +19,7 @@ import { StorageLifecycleService } from "./common/storage-lifecycle.service";
 import { TelemetryService } from "./common/telemetry.service";
 import { SlugCacheService } from "./common/slug-cache.service";
 import { StorageService } from "./common/storage.service";
+import { WorkerHeartbeatService } from "./common/worker-heartbeat.service";
 import { QrRenderService } from "./common/qr-render.service";
 import { AnalyticsService } from "./common/analytics.service";
 import { AuthService } from "./modules/auth/auth.service";
@@ -47,6 +48,7 @@ import { ScanService } from "./modules/scan/scan.service";
     SlugCacheService,
     StorageService,
     StorageLifecycleService,
+    WorkerHeartbeatService,
     QrRenderService,
     QrAssetPipelineService,
     AnalyticsService,

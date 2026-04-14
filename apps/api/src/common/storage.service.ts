@@ -3,6 +3,7 @@ import {
   InternalServerErrorException,
   OnModuleInit
 } from "@nestjs/common";
+import { StructuredLoggerService } from "./structured-logger.service";
 import { LocalStorageDriver } from "./storage/local-storage.driver";
 import { S3StorageDriver } from "./storage/s3-storage.driver";
 import type {
@@ -16,13 +17,19 @@ import type {
 export class StorageService implements OnModuleInit {
   private driver: StorageDriver | null = null;
 
+  constructor(private readonly logger: StructuredLoggerService) {}
+
   async onModuleInit() {
     const driver = this.getDriverInstance();
     await driver.initialize();
 
-    console.log("storage.initialized", {
-      driver: driver.kind
-    });
+    this.logger.info(
+      "storage.initialized",
+      {
+        driver: driver.kind
+      },
+      StorageService.name
+    );
   }
 
   async putObject(storageKey: string, body: Buffer | string) {

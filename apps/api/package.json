@@ -7,6 +7,7 @@
     "build": "nest build",
     "start": "node dist/apps/api/src/main.js",
     "start:worker": "node dist/apps/api/src/worker.js",
+    "health:worker": "node dist/apps/api/src/worker-health.js",
     "lint": "tsc --noEmit",
     "storage:cleanup": "tsx src/storage-maintenance.ts",
     "storage:cleanup:dry-run": "tsx src/storage-maintenance.ts --dry-run",

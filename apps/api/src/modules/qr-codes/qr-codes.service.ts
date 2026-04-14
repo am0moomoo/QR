@@ -3,7 +3,8 @@ import {
   ForbiddenException,
   HttpException,
   Injectable,
-  NotFoundException
+  NotFoundException,
+  ServiceUnavailableException
 } from "@nestjs/common";
 import {
   AssetFormat,
@@ -16,11 +17,11 @@ import {
   type ExportFormat,
   type QrType,
   createQrCodeSchema,
+  getQrContentSchema,
   getQrTargetUrl,
   qrDesignSchema,
   qrSettingsSchema,
   updateQrCodeSchema,
-  validateQrContent
 } from "@qr/types";
 import { z } from "zod";
 import { AnalyticsService } from "../../common/analytics.service";
@@ -34,6 +35,7 @@ import { SlugCacheService } from "../../common/slug-cache.service";
 import { StorageService } from "../../common/storage.service";
 import { StructuredLoggerService } from "../../common/structured-logger.service";
 import { TelemetryService } from "../../common/telemetry.service";
+import { assertSafeRedirectTarget } from "../../common/url-safety";
 import { parseWithSchema } from "../../common/zod.util";
 import { BillingService } from "../billing/billing.service";
 
@@ -66,6 +68,13 @@ type DownloadRedirectResponse = {
 };
 
 type DownloadResponse = DownloadFileResponse | DownloadRedirectResponse;
+
+class DownloadAssetValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DownloadAssetValidationError";
+  }
+}
 
 @Injectable()
 export class QrCodesService {
@@ -141,8 +150,12 @@ export class QrCodesService {
         workspace.id,
         settings
       );
-      const content = validateQrContent(input.type, input.content);
+      const content = parseWithSchema(
+        getQrContentSchema(input.type) as z.ZodTypeAny,
+        input.content
+      );
       const targetUrl = getQrTargetUrl(input.type, content);
+      assertSafeRedirectTarget(targetUrl, "QR destination");
       const slug = await this.generateUniqueSlug();
       const passwordHash = effectiveSettings.password
         ? await hash(effectiveSettings.password, 12)
@@ -229,6 +242,16 @@ export class QrCodesService {
         userId,
         workspaceId: createdQr.workspaceId
       });
+      this.logger.info(
+        "qr.created",
+        {
+          qrCodeId: createdQr.id,
+          type: createdQr.type,
+          userId,
+          workspaceId: createdQr.workspaceId
+        },
+        QrCodesService.name
+      );
 
       return this.toCreateQrResponse(createdQr);
     } catch (error) {
@@ -257,11 +280,15 @@ export class QrCodesService {
     const input = parseWithSchema(updateQrCodeSchema, payload);
     const existingQr = await this.requireQrCodeAccess(id, userId);
     const nextContent = input.content
-      ? validateQrContent(existingQr.type as QrType, input.content)
+      ? parseWithSchema(
+          getQrContentSchema(existingQr.type as QrType) as z.ZodTypeAny,
+          input.content
+        )
       : (existingQr.content?.payload as Prisma.JsonObject | null);
     const nextTargetUrl = nextContent
       ? getQrTargetUrl(existingQr.type as QrType, nextContent)
       : existingQr.content?.targetUrl ?? null;
+    assertSafeRedirectTarget(nextTargetUrl, "QR destination");
     const nextDesign = input.design
       ? qrDesignSchema.parse(input.design)
       : existingQr.design;
@@ -392,6 +419,14 @@ export class QrCodesService {
       qrCodeId: finalQr.id,
       userId
     });
+    this.logger.info(
+      "qr.updated",
+      {
+        qrCodeId: finalQr.id,
+        userId
+      },
+      QrCodesService.name
+    );
 
     return this.toQrResponse(finalQr);
   }
@@ -418,6 +453,14 @@ export class QrCodesService {
       qrCodeId: id,
       userId
     });
+    this.logger.info(
+      "qr.deleted",
+      {
+        qrCodeId: id,
+        userId
+      },
+      QrCodesService.name
+    );
 
     return {
       success: true
@@ -458,6 +501,16 @@ export class QrCodesService {
       throw new NotFoundException("QR download was not generated");
     }
 
+    this.logger.info(
+      "qr.download_requested",
+      {
+        format: normalizedFormat,
+        qrCodeId: qrCode.id,
+        userId
+      },
+      QrCodesService.name
+    );
+
     const signedDownloadUrl = await this.storage.getSignedDownloadUrl(
       asset.storageKey,
       this.getSignedUrlTtlSeconds()
@@ -472,7 +525,7 @@ export class QrCodesService {
       };
     }
 
-    const storedObject = await this.storage.getObject(asset.storageKey);
+    const storedObject = await this.loadDownloadObject(qrCode, asset, normalizedFormat);
 
     return {
       body: storedObject.body,
@@ -485,16 +538,41 @@ export class QrCodesService {
 
   async render(userId: string, id: string) {
     const qrCode = await this.requireQrCodeAccess(id, userId);
-    const refreshed = await this.renderQueue.render(
-      qrCode.id,
-      this.assetPipeline.getExistingExportFormats(qrCode),
-      qrCode.updatedAt.toISOString()
-    );
+    let refreshed: QrCodeRecord;
+
+    try {
+      refreshed = await this.renderQueue.render(
+        qrCode.id,
+        this.assetPipeline.getExistingExportFormats(qrCode),
+        qrCode.updatedAt.toISOString()
+      );
+    } catch (error) {
+      this.logger.error(
+        "qr.render_failed",
+        error,
+        {
+          qrCodeId: id,
+          userId
+        },
+        QrCodesService.name
+      );
+      throw new ServiceUnavailableException(
+        "QR assets could not be regenerated right now. Please try again in a moment."
+      );
+    }
 
     this.telemetry.track("qr.render_requested", {
       qrCodeId: id,
       userId
     });
+    this.logger.info(
+      "qr.render_requested",
+      {
+        qrCodeId: id,
+        userId
+      },
+      QrCodesService.name
+    );
 
     return {
       accepted: true,
@@ -617,6 +695,15 @@ export class QrCodesService {
       qrCodeId: duplicatedQr.id,
       userId
     });
+    this.logger.info(
+      "qr.duplicated",
+      {
+        fromQrCodeId: id,
+        qrCodeId: duplicatedQr.id,
+        userId
+      },
+      QrCodesService.name
+    );
 
     return this.toCreateQrResponse(duplicatedQr);
   }
@@ -762,6 +849,132 @@ export class QrCodesService {
           asset.publicUrl ??
           this.buildDownloadUrl(qrCode.id, asset.format.toLowerCase())
       }));
+  }
+
+  private async loadDownloadObject(
+    qrCode: QrCodeRecord,
+    asset: QrCodeRecord["assets"][number],
+    format: ExportFormat
+  ) {
+    try {
+      const storedObject = await this.storage.getObject(asset.storageKey);
+      this.assertDownloadBodyMatchesFormat(asset.format, storedObject.body);
+      return storedObject;
+    } catch (error) {
+      if (!this.isRecoverableDownloadError(error)) {
+        throw error;
+      }
+
+      this.logger.warn(
+        "qr.download_asset_repair_started",
+        {
+          format,
+          qrCodeId: qrCode.id,
+          reason: error instanceof Error ? error.message : String(error),
+          storageKey: asset.storageKey
+        },
+        QrCodesService.name
+      );
+
+      const repairedAsset = await this.repairDownloadAsset(qrCode, format);
+
+      try {
+        const repairedObject = await this.storage.getObject(repairedAsset.storageKey);
+        this.assertDownloadBodyMatchesFormat(repairedAsset.format, repairedObject.body);
+        return repairedObject;
+      } catch (repairError) {
+        this.logger.error(
+          "qr.download_asset_repair_fetch_failed",
+          repairError,
+          {
+            format,
+            qrCodeId: qrCode.id,
+            storageKey: repairedAsset.storageKey
+          },
+          QrCodesService.name
+        );
+        throw new ServiceUnavailableException(
+          "QR asset is temporarily unavailable. Please try again in a moment."
+        );
+      }
+    }
+  }
+
+  private async repairDownloadAsset(
+    qrCode: QrCodeRecord,
+    format: ExportFormat
+  ) {
+    try {
+      const refreshed = await this.renderQueue.render(
+        qrCode.id,
+        [
+          ...new Set([
+            ...this.assetPipeline.getExistingExportFormats(qrCode),
+            format
+          ])
+        ] as ExportFormat[],
+        qrCode.updatedAt.toISOString()
+      );
+      const repairedAsset = refreshed.assets.find(
+        (currentAsset) =>
+          currentAsset.kind === "QR_IMAGE" &&
+          currentAsset.format === this.toAssetFormat(format)
+      );
+
+      if (!repairedAsset) {
+        throw new ServiceUnavailableException(
+          "QR assets could not be repaired right now. Please try again in a moment."
+        );
+      }
+
+      return repairedAsset;
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
+
+      this.logger.error(
+        "qr.download_asset_repair_failed",
+        error,
+        {
+          format,
+          qrCodeId: qrCode.id
+        },
+        QrCodesService.name
+      );
+      throw new ServiceUnavailableException(
+        "QR asset is temporarily unavailable. Please try again in a moment."
+      );
+    }
+  }
+
+  private assertDownloadBodyMatchesFormat(format: AssetFormat, body: Buffer) {
+    if (format === AssetFormat.PNG) {
+      const pngSignature = "89504e470d0a1a0a";
+
+      if (body.subarray(0, 8).toString("hex") !== pngSignature) {
+        throw new DownloadAssetValidationError(
+          "Stored PNG asset contents do not match the expected file format."
+        );
+      }
+
+      return;
+    }
+
+    const normalized = body.toString("utf8", 0, Math.min(body.length, 512)).trimStart();
+
+    if (!normalized.startsWith("<svg") && !normalized.startsWith("<?xml")) {
+      throw new DownloadAssetValidationError(
+        "Stored SVG asset contents do not match the expected file format."
+      );
+    }
+  }
+
+  private isRecoverableDownloadError(error: unknown) {
+    return (
+      error instanceof NotFoundException ||
+      error instanceof DownloadAssetValidationError
+    );
   }
 
   private buildShortUrl(slug: string) {

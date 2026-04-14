@@ -116,6 +116,155 @@ const nullableStringSchema = z
   .optional()
   .transform((value) => value ?? null);
 
+function tryParseUrl(value: string) {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function isIpv4Hostname(hostname: string) {
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname);
+}
+
+function isPrivateIpv4(hostname: string) {
+  if (!isIpv4Hostname(hostname)) {
+    return false;
+  }
+
+  const octets = hostname.split(".").map((value) => Number(value));
+  const firstOctet = octets[0] ?? -1;
+  const secondOctet = octets[1] ?? -1;
+
+  if (octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+    return true;
+  }
+
+  if (firstOctet === 10 || firstOctet === 127) {
+    return true;
+  }
+
+  if (firstOctet === 169 && secondOctet === 254) {
+    return true;
+  }
+
+  if (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) {
+    return true;
+  }
+
+  if (firstOctet === 192 && secondOctet === 168) {
+    return true;
+  }
+
+  if (firstOctet === 100 && secondOctet >= 64 && secondOctet <= 127) {
+    return true;
+  }
+
+  if (firstOctet === 198 && (secondOctet === 18 || secondOctet === 19)) {
+    return true;
+  }
+
+  return false;
+}
+
+function isPrivateIpv6(hostname: string) {
+  const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+
+  if (!normalized.includes(":")) {
+    return false;
+  }
+
+  return (
+    normalized === "::1" ||
+    normalized === "::" ||
+    normalized.startsWith("fe80:") ||
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd")
+  );
+}
+
+export function isPrivateHostname(hostname: string) {
+  const normalized = hostname.trim().toLowerCase().replace(/\.$/, "");
+
+  if (!normalized) {
+    return true;
+  }
+
+  if (
+    normalized === "localhost" ||
+    normalized === "host.docker.internal" ||
+    normalized.endsWith(".localhost") ||
+    normalized.endsWith(".local") ||
+    normalized.endsWith(".internal")
+  ) {
+    return true;
+  }
+
+  return isPrivateIpv4(normalized) || isPrivateIpv6(normalized);
+}
+
+type UrlSafetyOptions = {
+  allowPrivateHosts?: boolean;
+};
+
+export function isSafeHttpUrl(value: string, options: UrlSafetyOptions = {}) {
+  const parsed = tryParseUrl(value);
+
+  if (!parsed) {
+    return false;
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return false;
+  }
+
+  if (parsed.username || parsed.password) {
+    return false;
+  }
+
+  if (!options.allowPrivateHosts && isPrivateHostname(parsed.hostname)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function isSafeRedirectDestination(
+  value: string,
+  options: UrlSafetyOptions = {}
+) {
+  const parsed = tryParseUrl(value);
+
+  if (!parsed) {
+    return false;
+  }
+
+  if (
+    parsed.protocol === "mailto:" ||
+    parsed.protocol === "sms:" ||
+    parsed.protocol === "tel:"
+  ) {
+    return true;
+  }
+
+  return isSafeHttpUrl(value, options);
+}
+
+const httpUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .refine(
+    (value) => isSafeHttpUrl(value, { allowPrivateHosts: true }),
+    "Only absolute http and https URLs without embedded credentials are allowed"
+  );
+
+const nullableHttpUrlSchema = z
+  .union([httpUrlSchema, z.null()])
+  .optional()
+  .transform((value) => value ?? null);
+
 export const registerSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8).max(128),
@@ -137,7 +286,7 @@ export const resetPasswordSchema = z.object({
 });
 
 export const updateProfileSchema = z.object({
-  avatarUrl: z.union([z.string().trim().url(), z.null()]).optional(),
+  avatarUrl: nullableHttpUrlSchema,
   fullName: z.union([z.string().trim().min(1).max(120), z.null()]).optional(),
   locale: z.string().trim().min(2).max(16).optional()
 });
@@ -147,8 +296,8 @@ export const billingSummaryQuerySchema = z.object({
 });
 
 export const createCheckoutSessionSchema = z.object({
-  cancelUrl: z.string().trim().url().optional(),
-  successUrl: z.string().trim().url().optional(),
+  cancelUrl: httpUrlSchema.optional(),
+  successUrl: httpUrlSchema.optional(),
   targetPlan: z.enum(["lite", "premium"]),
   workspaceId: z.string().uuid()
 });
@@ -188,7 +337,7 @@ export const qrSettingsSchema = z
   })
   .default({});
 
-const urlSchema = z.string().trim().url();
+const urlSchema = httpUrlSchema;
 
 const qrContentSchemaMap = {
   link: z.object({
@@ -222,7 +371,7 @@ const qrContentSchemaMap = {
     title: nullableStringSchema,
     phone: nullableStringSchema,
     email: nullableStringSchema,
-    website: nullableStringSchema,
+    website: nullableHttpUrlSchema,
     address: nullableStringSchema
   }),
   geo: z.object({
@@ -251,9 +400,9 @@ const qrContentSchemaMap = {
   }),
   "app-store": z
     .object({
-      iosUrl: nullableStringSchema,
-      androidUrl: nullableStringSchema,
-      fallbackUrl: nullableStringSchema
+      iosUrl: nullableHttpUrlSchema,
+      androidUrl: nullableHttpUrlSchema,
+      fallbackUrl: nullableHttpUrlSchema
     })
     .refine(
       (value) => Boolean(value.iosUrl || value.androidUrl || value.fallbackUrl),
@@ -274,7 +423,7 @@ const qrContentSchemaMap = {
   coupon: z.object({
     title: z.string().trim().min(1).max(160),
     code: z.string().trim().min(1).max(80),
-    targetUrl: nullableStringSchema
+    targetUrl: nullableHttpUrlSchema
   }),
   "social-profile": z.object({
     profileUrl: urlSchema,

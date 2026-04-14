@@ -67,47 +67,62 @@ export class AggregateQueueService implements OnModuleDestroy {
       );
     }
 
-    const jobId = this.buildJobId(qrCodeId, day);
-    const existingJob = await this.queue!.getJob(jobId);
+    try {
+      const jobId = this.buildJobId(qrCodeId, day);
+      const existingJob = await this.queue!.getJob(jobId);
 
-    if (existingJob) {
-      const state = await existingJob.getState();
+      if (existingJob) {
+        const state = await existingJob.getState();
 
-      if (
-        (state === "active" || state === "waiting" || state === "delayed")
-      ) {
-        if (options.waitForCompletion) {
-          await existingJob.waitUntilFinished(this.queueEvents!, 30_000);
+        if (
+          state === "active" ||
+          state === "waiting" ||
+          state === "delayed"
+        ) {
+          if (options.waitForCompletion) {
+            await existingJob.waitUntilFinished(this.queueEvents!, 30_000);
+          }
+
+          return;
         }
 
-        return;
+        if (state === "completed" || state === "failed") {
+          await existingJob.remove();
+        }
       }
 
-      if (state === "completed" || state === "failed") {
-        await existingJob.remove();
-      }
-    }
-
-    const job = await this.queue!.add(
-      "aggregate-daily",
-      {
-        day: day.toISOString(),
-        qrCodeId
-      },
-      {
-        attempts: 5,
-        backoff: {
-          delay: 500,
-          type: "exponential"
+      const job = await this.queue!.add(
+        "aggregate-daily",
+        {
+          day: day.toISOString(),
+          qrCodeId
         },
-        jobId,
-        removeOnComplete: 1000,
-        removeOnFail: 1000
-      }
-    );
+        {
+          attempts: 5,
+          backoff: {
+            delay: 500,
+            type: "exponential"
+          },
+          jobId,
+          removeOnComplete: 1000,
+          removeOnFail: 1000
+        }
+      );
 
-    if (options.waitForCompletion) {
-      await job.waitUntilFinished(this.queueEvents!, 30_000);
+      if (options.waitForCompletion) {
+        await job.waitUntilFinished(this.queueEvents!, 30_000);
+      }
+    } catch (error) {
+      this.logger.warn(
+        "aggregate.queue_failed_falling_back_inline",
+        {
+          day: day.toISOString(),
+          qrCodeId,
+          reason: error instanceof Error ? error.message : String(error)
+        },
+        AggregateQueueService.name
+      );
+      await this.analytics.recomputeDailyAggregate(qrCodeId, day);
     }
   }
 

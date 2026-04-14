@@ -53,10 +53,12 @@ export class ApiExceptionFilter implements ExceptionFilter {
     statusCode: number,
     requestId: string
   ) {
+    const safeServerMessage = this.resolveSafeServerMessage(exception, statusCode);
     const message =
-      statusCode >= 500
+      safeServerMessage ??
+      (statusCode >= 500
         ? "Something went wrong while processing the request. Try again in a moment."
-        : this.resolveMessage(exception, statusCode);
+        : this.resolveMessage(exception, statusCode));
 
     return {
       code: this.resolveCode(statusCode),
@@ -108,8 +110,22 @@ export class ApiExceptionFilter implements ExceptionFilter {
         return "RATE_LIMITED";
       case HttpStatus.UNPROCESSABLE_ENTITY:
         return "VALIDATION_ERROR";
+      case HttpStatus.SERVICE_UNAVAILABLE:
+        return "SERVICE_UNAVAILABLE";
       default:
         return "INTERNAL_SERVER_ERROR";
     }
+  }
+
+  private resolveSafeServerMessage(exception: unknown, statusCode: number) {
+    if (!(exception instanceof HttpException)) {
+      return null;
+    }
+
+    if (statusCode === HttpStatus.SERVICE_UNAVAILABLE) {
+      return this.resolveMessage(exception, statusCode);
+    }
+
+    return null;
   }
 }

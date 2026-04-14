@@ -15,7 +15,9 @@ import {
   updateProfileSchema
 } from "@qr/types";
 import { PrismaService } from "../../common/prisma.service";
+import { StructuredLoggerService } from "../../common/structured-logger.service";
 import { TelemetryService } from "../../common/telemetry.service";
+import { assertSafeUserFacingUrl } from "../../common/url-safety";
 import { parseWithSchema } from "../../common/zod.util";
 
 type SessionWithUser = Prisma.SessionGetPayload<{
@@ -26,7 +28,8 @@ type SessionWithUser = Prisma.SessionGetPayload<{
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly telemetry: TelemetryService
+    private readonly telemetry: TelemetryService,
+    private readonly logger: StructuredLoggerService
   ) {}
 
   async register(payload: unknown) {
@@ -85,6 +88,13 @@ export class AuthService {
     this.telemetry.track("auth.registered", {
       userId: user.id
     });
+    this.logger.info(
+      "auth.registered",
+      {
+        userId: user.id
+      },
+      AuthService.name
+    );
 
     return {
       accessToken: session.token,
@@ -116,6 +126,13 @@ export class AuthService {
     this.telemetry.track("auth.logged_in", {
       userId: user.id
     });
+    this.logger.info(
+      "auth.logged_in",
+      {
+        userId: user.id
+      },
+      AuthService.name
+    );
 
     return {
       accessToken: session.token,
@@ -126,14 +143,26 @@ export class AuthService {
   }
 
   async logout(sessionId: string) {
-    await this.prisma.session.update({
-      where: { id: sessionId },
-      data: { revokedAt: new Date() }
+    await this.prisma.session.updateMany({
+      where: {
+        id: sessionId,
+        revokedAt: null
+      },
+      data: {
+        revokedAt: new Date()
+      }
     });
 
     this.telemetry.track("auth.logged_out", {
       sessionId
     });
+    this.logger.info(
+      "auth.logged_out",
+      {
+        sessionId
+      },
+      AuthService.name
+    );
 
     return {
       success: true
@@ -227,6 +256,13 @@ export class AuthService {
     this.telemetry.track("auth.password_reset_requested", {
       userId: user.id
     });
+    this.logger.info(
+      "auth.password_reset_requested",
+      {
+        userId: user.id
+      },
+      AuthService.name
+    );
 
     return {
       expiresAt: expiresAt.toISOString(),
@@ -291,6 +327,13 @@ export class AuthService {
     this.telemetry.track("auth.password_reset_completed", {
       userId: token.userId
     });
+    this.logger.info(
+      "auth.password_reset_completed",
+      {
+        userId: token.userId
+      },
+      AuthService.name
+    );
 
     return {
       accessToken: session.token,
@@ -302,11 +345,15 @@ export class AuthService {
 
   async updateProfile(userId: string, payload: unknown) {
     const input = parseWithSchema(updateProfileSchema, payload);
+    const safeAvatarUrl = assertSafeUserFacingUrl(
+      input.avatarUrl,
+      "Avatar URL"
+    );
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: {
         avatarUrl:
-          input.avatarUrl !== undefined ? input.avatarUrl : undefined,
+          input.avatarUrl !== undefined ? safeAvatarUrl : undefined,
         fullName:
           input.fullName !== undefined ? input.fullName : undefined,
         locale: input.locale !== undefined ? input.locale : undefined
@@ -316,6 +363,13 @@ export class AuthService {
     this.telemetry.track("auth.profile_updated", {
       userId
     });
+    this.logger.info(
+      "auth.profile_updated",
+      {
+        userId
+      },
+      AuthService.name
+    );
 
     return this.serializeUser(user, {
       defaultWorkspaceId: await this.getDefaultWorkspaceIdForUser(userId)

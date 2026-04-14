@@ -15,6 +15,7 @@ import { ScanRateLimitService } from "../../common/scan-rate-limit.service";
 import { SlugCacheService } from "../../common/slug-cache.service";
 import { StructuredLoggerService } from "../../common/structured-logger.service";
 import { TelemetryService } from "../../common/telemetry.service";
+import { assertSafeRedirectTarget } from "../../common/url-safety";
 
 type ScanRecord = Prisma.QRCodeGetPayload<{
   include: {
@@ -122,6 +123,7 @@ export class ScanService {
       qrCode.content?.targetUrl ??
       getQrTargetUrl(qrCode.type as QrType, qrCode.content?.payload ?? {});
     const destination = matchedRule?.targetUrl ?? fallbackTarget;
+    assertSafeRedirectTarget(destination, "QR destination");
 
     await this.touchSuccessfulScan(qrCode);
     await this.recordOutcome(

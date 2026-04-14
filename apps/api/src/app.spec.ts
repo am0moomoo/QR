@@ -194,7 +194,7 @@ test("AuthService.register creates a default workspace and returns a bearer toke
       })
   };
 
-  const service = new AuthService(prisma as any, telemetry as any);
+  const service = new AuthService(prisma as any, telemetry as any, logger as any);
   const result = await service.register({
     email: "Test.User@example.com",
     fullName: "Test User",
@@ -232,7 +232,7 @@ test("AuthService.forgotPassword issues a reset token in non-production mode", a
       })
   };
 
-  const service = new AuthService(prisma as any, telemetry as any);
+  const service = new AuthService(prisma as any, telemetry as any, logger as any);
   const result = await service.forgotPassword({
     email: "owner@example.com"
   });
@@ -381,9 +381,13 @@ test("QrCodesService.create renders real download assets and returns stable shor
   };
   const qrRender = {
     async render({ format }: { format: "png" | "svg" }) {
+      const body =
+        format === "png"
+          ? Buffer.from("89504e470d0a1a0a0000000d49484452", "hex")
+          : Buffer.from("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
       return {
-        body: Buffer.from(`${format}-body`),
-        bytes: BigInt(9),
+        body,
+        bytes: BigInt(body.byteLength),
         checksum: `checksum-${format}`,
         contentType: format === "png" ? "image/png" : "image/svg+xml",
         extension: format,
@@ -474,7 +478,7 @@ test("QrCodesService.create renders real download assets and returns stable shor
   const download = await service.download("user-1", qrCodeId, "png");
   assert.equal(download.kind, "file");
   assert.equal(download.contentType, "image/png");
-  assert.equal(download.body.toString(), "png-body");
+  assert.equal(download.body.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
 });
 
 test("ScanService.resolve asks for a password before redirecting protected QR codes", async () => {

@@ -2,7 +2,11 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { StructuredLoggerService } from "./common/structured-logger.service";
-import { getNestLoggerLevels, getRuntimeSummary } from "./runtime-config";
+import {
+  getNestLoggerLevels,
+  getRuntimeSummary,
+  getRuntimeWarnings
+} from "./runtime-config";
 
 async function bootstrapWorker() {
   process.env.QUEUE_DRIVER = process.env.QUEUE_DRIVER ?? "bullmq";
@@ -18,6 +22,15 @@ async function bootstrapWorker() {
     getRuntimeSummary(),
     "bootstrap"
   );
+  for (const warning of getRuntimeWarnings()) {
+    app.get(StructuredLoggerService).warn(
+      "worker.runtime_warning",
+      {
+        warning
+      },
+      "bootstrap"
+    );
+  }
 }
 
 bootstrapWorker().catch((error) => {

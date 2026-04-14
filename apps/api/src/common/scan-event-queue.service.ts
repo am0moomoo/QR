@@ -79,18 +79,7 @@ export class ScanEventQueueService implements OnModuleDestroy {
     };
 
     if (!(await this.ensureBullMq())) {
-      await this.analytics.recordRawScanEvent({
-        ...payload,
-        scannedAt: new Date(payload.scannedAt)
-      });
-      await this.aggregates.queueDailyAggregate(
-        payload.qrCodeId,
-        new Date(payload.scannedAt),
-        {
-          waitForCompletion: payload.awaitAggregate
-        }
-      );
-      return payload.requestId;
+      return this.processInline(payload);
     }
 
     if (!this.canProduce()) {
@@ -100,26 +89,55 @@ export class ScanEventQueueService implements OnModuleDestroy {
     }
 
     const jobId = payload.requestId!;
-    const existingJob = await this.queue!.getJob(jobId);
 
-    if (existingJob) {
-      await existingJob.waitUntilFinished(this.queueEvents!, 30_000);
+    try {
+      const existingJob = await this.queue!.getJob(jobId);
+
+      if (existingJob) {
+        await existingJob.waitUntilFinished(this.queueEvents!, 30_000);
+        return jobId;
+      }
+
+      const job = await this.queue!.add("scan-event", payload, {
+        attempts: 5,
+        backoff: {
+          delay: 500,
+          type: "exponential"
+        },
+        jobId,
+        removeOnComplete: 1000,
+        removeOnFail: 1000
+      });
+
+      await job.waitUntilFinished(this.queueEvents!, 30_000);
       return jobId;
+    } catch (error) {
+      this.logger.warn(
+        "scan_event.queue_failed_falling_back_inline",
+        {
+          qrCodeId: payload.qrCodeId,
+          reason: error instanceof Error ? error.message : String(error),
+          requestId: payload.requestId
+        },
+        ScanEventQueueService.name
+      );
+      return this.processInline(payload);
     }
+  }
 
-    const job = await this.queue!.add("scan-event", payload, {
-      attempts: 5,
-      backoff: {
-        delay: 500,
-        type: "exponential"
-      },
-      jobId,
-      removeOnComplete: 1000,
-      removeOnFail: 1000
+  private async processInline(payload: ScanEventJobData) {
+    await this.analytics.recordRawScanEvent({
+      ...payload,
+      scannedAt: new Date(payload.scannedAt)
     });
-
-    await job.waitUntilFinished(this.queueEvents!, 30_000);
-    return jobId;
+    await this.aggregates.queueDailyAggregate(
+      payload.qrCodeId,
+      new Date(payload.scannedAt),
+      {
+        waitForCompletion: payload.awaitAggregate
+      }
+    );
+    return payload.requestId;
   }
 
   private async ensureBullMq() {

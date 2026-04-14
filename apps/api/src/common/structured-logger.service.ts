@@ -5,6 +5,14 @@ type LogContext = Record<string, unknown>;
 @Injectable()
 export class StructuredLoggerService {
   private readonly loggers = new Map<string, Logger>();
+  private readonly redactedKeys = [
+    "authorization",
+    "cookie",
+    "password",
+    "secret",
+    "signature",
+    "token"
+  ];
 
   info(event: string, context: LogContext = {}, scope = "app") {
     this.write("log", event, context, scope);
@@ -37,7 +45,7 @@ export class StructuredLoggerService {
 
   private write(level: LogLevel, event: string, context: LogContext, scope: string) {
     const payload = {
-      ...context,
+      ...this.sanitize(context),
       event,
       level,
       scope,
@@ -61,16 +69,16 @@ export class StructuredLoggerService {
 
   private serializeError(error: unknown) {
     if (error instanceof Error) {
-      return {
+      return this.sanitize({
         message: error.message,
         name: error.name,
         stack: error.stack
-      };
+      });
     }
 
-    return {
+    return this.sanitize({
       message: String(error)
-    };
+    });
   }
 
   private stringify(value: unknown) {
@@ -81,5 +89,31 @@ export class StructuredLoggerService {
 
       return currentValue;
     });
+  }
+
+  private sanitize<T>(value: T): T {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitize(item)) as T;
+    }
+
+    if (!value || typeof value !== "object") {
+      return value;
+    }
+
+    const sanitized = Object.entries(value as Record<string, unknown>).reduce<
+      Record<string, unknown>
+    >((accumulator, [key, currentValue]) => {
+      accumulator[key] = this.shouldRedactKey(key)
+        ? "[REDACTED]"
+        : this.sanitize(currentValue);
+      return accumulator;
+    }, {});
+
+    return sanitized as T;
+  }
+
+  private shouldRedactKey(key: string) {
+    const normalizedKey = key.trim().toLowerCase();
+    return this.redactedKeys.some((candidate) => normalizedKey.includes(candidate));
   }
 }

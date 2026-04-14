@@ -13,6 +13,8 @@ import { AppModule } from "../app.module";
 import { configureApiApp } from "../bootstrap-api";
 import { PrismaService } from "../common/prisma.service";
 import { RedisService } from "../common/redis.service";
+import { RenderQueueService } from "../common/render-queue.service";
+import { StorageService } from "../common/storage.service";
 
 let app: INestApplication | null = null;
 let prisma: PrismaService | null = null;
@@ -370,7 +372,7 @@ test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -
       .expect(201);
   }
 
-  await request(server)
+  const freeLimitBlocked = await request(server)
     .post("/api/v1/qr-codes")
     .set("Authorization", `Bearer ${bearerToken}`)
     .send({
@@ -405,6 +407,13 @@ test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -
       workspaceId: workspace.id
     })
     .expect(403);
+
+  assert.equal(freeLimitBlocked.body.code, "FORBIDDEN");
+  assert.equal(
+    freeLimitBlocked.body.message,
+    "Free allows up to 3 active QR codes. Upgrade to continue creating more."
+  );
+  assert.match(freeLimitBlocked.body.requestId, /^[0-9a-f-]{36}$/i);
 
   await request(server)
     .post(`/api/v1/qr-codes/${createQr.body.id}/render`)
@@ -684,7 +693,7 @@ test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -
     }
   });
 
-  await request(server)
+  const storageLimited = await request(server)
     .post("/api/v1/qr-codes")
     .set("Authorization", `Bearer ${bearerToken}`)
     .send({
@@ -720,6 +729,10 @@ test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -
     })
     .expect(403);
 
+  assert.equal(storageLimited.body.code, "FORBIDDEN");
+  assert.match(storageLimited.body.message, /includes up to/i);
+  assert.match(storageLimited.body.requestId, /^[0-9a-f-]{36}$/i);
+
   const forgotPassword = await request(server)
     .post("/api/v1/auth/forgot-password")
     .send({
@@ -739,6 +752,14 @@ test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -
 
   const resetToken = resetPassword.body.accessToken as string;
   assert.ok(resetToken);
+
+  await request(server)
+    .get("/api/v1/me")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .expect(401)
+    .expect(({ body }: { body: Record<string, unknown> }) => {
+      assert.equal(body.code, "UNAUTHORIZED");
+    });
 
   await request(server)
     .post("/api/v1/auth/login")
@@ -770,4 +791,331 @@ test("integration smoke: auth -> qr flow -> billing upgrade -> quotas -> reset -
       assert.equal(body.locale, "ru");
       assert.equal(body.avatarUrl, "https://example.com/avatar.png");
     });
+});
+
+test("integration hardening: invalid session, unsafe inputs, asset repair, and webhook failure paths stay safe", async (t) => {
+  if (!(await ensureIntegrationReady(t))) {
+    return;
+  }
+
+  const server = app!.getHttpServer();
+  const storage = app!.get(StorageService);
+  const renderQueue = app!.get(RenderQueueService);
+  const suffix = `${Date.now()}-${Math.round(Math.random() * 10_000)}`;
+  const email = `hardening-${suffix}@example.com`;
+  const password = "StrongPass123!";
+
+  await request(server)
+    .get("/api/v1/me")
+    .expect(401)
+    .expect(({ body, headers }: { body: Record<string, unknown>; headers: Record<string, string> }) => {
+      assert.equal(body.code, "UNAUTHORIZED");
+      assert.match(String(body.requestId), /^[0-9a-f-]{36}$/i);
+      assert.equal(headers["x-request-id"], body.requestId);
+    });
+
+  const registration = await request(server)
+    .post("/api/v1/auth/register")
+    .send({
+      email,
+      fullName: "Hardening Owner",
+      password
+    })
+    .expect(201);
+
+  const initialToken = registration.body.accessToken as string;
+  const workspace = await prisma!.workspace.findFirstOrThrow({
+    where: {
+      ownerUserId: registration.body.user.id
+    }
+  });
+
+  await request(server)
+    .post("/api/v1/auth/logout")
+    .set("Authorization", `Bearer ${initialToken}`)
+    .expect(200);
+
+  await request(server)
+    .get("/api/v1/me")
+    .set("Authorization", `Bearer ${initialToken}`)
+    .expect(401)
+    .expect(({ body }: { body: Record<string, unknown> }) => {
+      assert.equal(body.code, "UNAUTHORIZED");
+    });
+
+  const login = await request(server)
+    .post("/api/v1/auth/login")
+    .send({
+      email,
+      password
+    })
+    .expect(200);
+
+  const bearerToken = login.body.accessToken as string;
+  const design = {
+    backgroundColor: "#ffffff",
+    cornersInner: "square",
+    cornersInnerColor: "#111111",
+    cornersOuter: "square",
+    cornersOuterColor: "#111111",
+    errorCorrection: "M",
+    logoAssetId: null,
+    logoHideBg: true,
+    pattern: "square",
+    patternColor: "#111111",
+    quietZoneModules: 4,
+    sizePx: 512
+  };
+  const settings = {
+    adsEnabled: true,
+    doNotIndex: false,
+    expiresAt: null,
+    isOneTime: false,
+    maxScans: null,
+    password: null
+  };
+
+  await request(server)
+    .post("/api/v1/qr-codes")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      content: {
+        link: "https://user:pass@example.com/unsafe"
+      },
+      design,
+      exports: ["png", "svg"],
+      settings,
+      title: "Unsafe QR",
+      type: "link",
+      workspaceId: workspace.id
+    })
+    .expect(400)
+    .expect(({ body }: { body: Record<string, unknown> }) => {
+      assert.equal(body.code, "BAD_REQUEST");
+      assert.equal(body.message, "Validation failed");
+      assert.match(String(body.requestId), /^[0-9a-f-]{36}$/i);
+    });
+
+  await request(server)
+    .patch("/api/v1/me")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      avatarUrl: "https://user:pass@example.com/avatar.png"
+    })
+    .expect(400)
+    .expect(({ body }: { body: Record<string, unknown> }) => {
+      assert.equal(body.code, "BAD_REQUEST");
+    });
+
+  await request(server)
+    .post("/api/v1/billing/checkout-session")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      cancelUrl: "https://evil.example.com/cancel",
+      successUrl: "https://evil.example.com/success",
+      targetPlan: "premium",
+      workspaceId: workspace.id
+    })
+    .expect(400)
+    .expect(({ body }: { body: Record<string, unknown> }) => {
+      assert.equal(body.code, "BAD_REQUEST");
+      assert.match(String(body.message), /must stay on/i);
+    });
+
+  const createQr = await request(server)
+    .post("/api/v1/qr-codes")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      content: {
+        link: "https://example.com/hardening"
+      },
+      design,
+      exports: ["png", "svg"],
+      settings,
+      title: "Hardening QR",
+      type: "link",
+      workspaceId: workspace.id
+    })
+    .expect(201);
+
+  const pngAsset = await prisma!.qRAsset.findFirstOrThrow({
+    where: {
+      format: "PNG",
+      qrCodeId: createQr.body.id
+    }
+  });
+
+  const originalGetObject = storage.getObject.bind(storage);
+  let returnedCorruptPayload = false;
+  storage.getObject = (async (storageKey: string) => {
+    if (!returnedCorruptPayload && storageKey === pngAsset.storageKey) {
+      returnedCorruptPayload = true;
+      return {
+        body: Buffer.from("not-a-real-png"),
+        bytes: BigInt(14)
+      };
+    }
+
+    return originalGetObject(storageKey);
+  }) as StorageService["getObject"];
+
+  t.after(() => {
+    storage.getObject = originalGetObject;
+  });
+
+  const repairedPngDownload = await request(server)
+    .get(`/api/v1/qr-codes/${createQr.body.id}/downloads?format=png`)
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .buffer(true)
+    .parse(binaryParser as unknown as (res: any, callback: (err: Error | null, body: any) => void) => void)
+    .expect(200);
+
+  assert.match(repairedPngDownload.headers["content-type"] ?? "", /image\/png/);
+  assert.ok(Buffer.isBuffer(repairedPngDownload.body));
+  assert.notEqual(repairedPngDownload.body.subarray(0, 8).toString("hex"), "");
+
+  const originalRender = renderQueue.render.bind(renderQueue);
+  renderQueue.render = (async () => {
+    throw new Error("render queue offline for test");
+  }) as RenderQueueService["render"];
+
+  try {
+    await request(server)
+      .post(`/api/v1/qr-codes/${createQr.body.id}/render`)
+      .set("Authorization", `Bearer ${bearerToken}`)
+      .expect(503)
+      .expect(({ body }: { body: Record<string, unknown> }) => {
+        assert.equal(body.message, "QR assets could not be regenerated right now. Please try again in a moment.");
+        assert.equal(body.code, "SERVICE_UNAVAILABLE");
+      });
+  } finally {
+    renderQueue.render = originalRender;
+  }
+
+  const invalidWebhookPayload = JSON.stringify({
+    id: "evt_invalid_signature",
+    object: "event",
+    type: "invoice.paid"
+  });
+
+  await request(server)
+    .post("/api/v1/billing/webhooks/stripe")
+    .set("Stripe-Signature", "t=1,v1=deadbeef")
+    .set("Content-Type", "application/json")
+    .send(invalidWebhookPayload)
+    .expect(403)
+    .expect(({ body, headers }: { body: Record<string, unknown>; headers: Record<string, string> }) => {
+      assert.equal(body.code, "FORBIDDEN");
+      assert.equal(body.message, "Stripe signature verification failed.");
+      assert.equal(headers["x-request-id"], body.requestId);
+    });
+
+  const checkoutSession = await request(server)
+    .post("/api/v1/billing/checkout-session")
+    .set("Authorization", `Bearer ${bearerToken}`)
+    .send({
+      targetPlan: "premium",
+      workspaceId: workspace.id
+    })
+    .expect(201);
+
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "whsec_mock";
+  const checkoutCompletedPayload = JSON.stringify({
+    id: `evt_checkout_completed_dup_${suffix}`,
+    object: "event",
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        client_reference_id: workspace.id,
+        customer: checkoutSession.body.stripeCustomerId,
+        id: checkoutSession.body.checkoutSessionId,
+        metadata: {
+          targetPlan: "premium",
+          userId: registration.body.user.id,
+          workspaceId: workspace.id
+        },
+        mode: "subscription",
+        object: "checkout.session",
+        subscription: checkoutSession.body.subscriptionId
+      }
+    }
+  });
+  const subscriptionUpdatedPayload = JSON.stringify({
+    id: `evt_subscription_updated_dup_${suffix}`,
+    object: "event",
+    type: "customer.subscription.updated",
+    data: {
+      object: {
+        cancel_at_period_end: false,
+        current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+        customer: checkoutSession.body.stripeCustomerId,
+        id: checkoutSession.body.subscriptionId,
+        items: {
+          data: [
+            {
+              price: {
+                id: process.env.STRIPE_PRICE_PREMIUM
+              }
+            }
+          ]
+        },
+        metadata: {
+          targetPlan: "premium",
+          userId: registration.body.user.id,
+          workspaceId: workspace.id
+        },
+        object: "subscription",
+        status: "active"
+      }
+    }
+  });
+  const invoicePaidPayload = JSON.stringify({
+    id: `evt_invoice_paid_dup_${suffix}`,
+    object: "event",
+    type: "invoice.paid",
+    data: {
+      object: {
+        amount_due: 4900,
+        created: Math.floor(Date.now() / 1000),
+        currency: "usd",
+        id: `in_test_dup_${suffix}`,
+        object: "invoice",
+        status: "paid",
+        subscription: checkoutSession.body.subscriptionId
+      }
+    }
+  });
+
+  for (const payload of [
+    checkoutCompletedPayload,
+    checkoutCompletedPayload,
+    subscriptionUpdatedPayload,
+    subscriptionUpdatedPayload,
+    invoicePaidPayload,
+    invoicePaidPayload
+  ]) {
+    await request(server)
+      .post("/api/v1/billing/webhooks/stripe")
+      .set(
+        "Stripe-Signature",
+        createStripeSignatureHeader(payload, webhookSecret)
+      )
+      .set("Content-Type", "application/json")
+      .send(payload)
+      .expect(200);
+  }
+
+  const duplicateSubscriptions = await prisma!.subscription.count({
+    where: {
+      stripeSubscriptionId: checkoutSession.body.subscriptionId
+    }
+  });
+  const duplicateInvoices = await prisma!.invoice.count({
+    where: {
+      stripeInvoiceId: `in_test_dup_${suffix}`
+    }
+  });
+
+  assert.equal(duplicateSubscriptions, 1);
+  assert.equal(duplicateInvoices, 1);
 });

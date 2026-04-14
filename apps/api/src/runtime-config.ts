@@ -57,3 +57,40 @@ export function getRuntimeSummary() {
     storageDriver: getStorageDriver()
   };
 }
+
+export function getRuntimeWarnings() {
+  const warnings: string[] = [];
+  const isProduction = (process.env.NODE_ENV ?? "development") === "production";
+
+  if (!isProduction) {
+    return warnings;
+  }
+
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET === "change-me") {
+    warnings.push("JWT_SECRET is using a placeholder value.");
+  }
+
+  if (!process.env.IP_HASH_SALT || process.env.IP_HASH_SALT === "change-me") {
+    warnings.push("IP_HASH_SALT is using a placeholder value.");
+  }
+
+  if (
+    !process.env.STRIPE_SECRET_KEY ||
+    process.env.STRIPE_SECRET_KEY === "sk_test_mock"
+  ) {
+    warnings.push("STRIPE_SECRET_KEY is still configured for mock billing.");
+  }
+
+  if (
+    !process.env.STRIPE_WEBHOOK_SECRET ||
+    process.env.STRIPE_WEBHOOK_SECRET === "whsec_mock"
+  ) {
+    warnings.push("STRIPE_WEBHOOK_SECRET is using the mock default.");
+  }
+
+  if (getStorageDriver() === "local") {
+    warnings.push("STORAGE_DRIVER is local; object storage is not configured.");
+  }
+
+  return warnings;
+}

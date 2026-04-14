@@ -23,6 +23,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../../common/prisma.service";
 import { StructuredLoggerService } from "../../common/structured-logger.service";
 import { TelemetryService } from "../../common/telemetry.service";
+import { assertAllowedReturnUrl } from "../../common/url-safety";
 import { parseWithSchema } from "../../common/zod.util";
 
 type StripeProviderMode = "mock" | "stripe";
@@ -131,17 +132,27 @@ export class BillingService {
     const input = parseWithSchema(createCheckoutSessionSchema, payload);
     const workspace = await this.requireWorkspaceAccess(input.workspaceId, userId);
     const targetPlan = input.targetPlan;
+    const appBaseUrl = this.getAppBaseUrl();
 
     if (this.normalizeWorkspacePlan(workspace.plan) === targetPlan) {
       throw new BadRequestException(`Workspace is already on the ${billingPlanCatalog[targetPlan].name} plan.`);
     }
 
     const successUrl =
-      input.successUrl ??
-      `${this.getAppBaseUrl()}/dashboard/billing?checkout_session_id={CHECKOUT_SESSION_ID}`;
+      assertAllowedReturnUrl(
+        input.successUrl ??
+          `${appBaseUrl}/dashboard/billing?checkout_session_id={CHECKOUT_SESSION_ID}`,
+        appBaseUrl,
+        "successUrl"
+      ) ??
+      `${appBaseUrl}/dashboard/billing?checkout_session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl =
-      input.cancelUrl ??
-      `${this.getAppBaseUrl()}/dashboard/billing?checkout_canceled=1`;
+      assertAllowedReturnUrl(
+        input.cancelUrl ?? `${appBaseUrl}/dashboard/billing?checkout_canceled=1`,
+        appBaseUrl,
+        "cancelUrl"
+      ) ??
+      `${appBaseUrl}/dashboard/billing?checkout_canceled=1`;
     const existingSubscription = await this.prisma.subscription.findFirst({
       where: {
         workspaceId: workspace.id
@@ -150,6 +161,16 @@ export class BillingService {
         updatedAt: "desc"
       }
     });
+    this.logger.info(
+      "billing.checkout_session_requested",
+      {
+        mode: this.getProviderMode(),
+        targetPlan,
+        userId,
+        workspaceId: workspace.id
+      },
+      BillingService.name
+    );
 
     if (this.getProviderMode() === "mock") {
       const checkoutSessionId = `cs_test_mock_${Date.now()}`;
@@ -325,6 +346,14 @@ export class BillingService {
 
   async handleStripeWebhook(signature: string | undefined, rawBody: Buffer | string) {
     const event = this.constructWebhookEvent(signature, rawBody);
+    this.logger.info(
+      "billing.webhook_received",
+      {
+        eventId: event.id,
+        type: event.type
+      },
+      BillingService.name
+    );
 
     switch (event.type) {
       case "checkout.session.completed":
@@ -355,6 +384,15 @@ export class BillingService {
         );
         break;
     }
+
+    this.logger.info(
+      "billing.webhook_processed",
+      {
+        eventId: event.id,
+        type: event.type
+      },
+      BillingService.name
+    );
 
     return { received: true };
   }
@@ -773,16 +811,36 @@ export class BillingService {
   private constructWebhookEvent(signature: string | undefined, rawBody: Buffer | string) {
     const bodyBuffer = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody);
 
-    if (this.getProviderMode() === "mock") {
-      this.verifyMockWebhookSignature(signature, bodyBuffer);
-      return JSON.parse(bodyBuffer.toString("utf8")) as Stripe.Event;
-    }
+    try {
+      if (this.getProviderMode() === "mock") {
+        this.verifyMockWebhookSignature(signature, bodyBuffer);
 
-    return this.requireStripeClient().webhooks.constructEvent(
-      bodyBuffer,
-      signature ?? "",
-      this.getWebhookSecret()
-    );
+        try {
+          return JSON.parse(bodyBuffer.toString("utf8")) as Stripe.Event;
+        } catch {
+          throw new BadRequestException("Stripe webhook payload is invalid JSON.");
+        }
+      }
+
+      return this.requireStripeClient().webhooks.constructEvent(
+        bodyBuffer,
+        signature ?? "",
+        this.getWebhookSecret()
+      );
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof ForbiddenException) {
+        throw error;
+      }
+
+      this.logger.warn(
+        "billing.webhook_signature_invalid",
+        {
+          reason: error instanceof Error ? error.message : String(error)
+        },
+        BillingService.name
+      );
+      throw new ForbiddenException("Stripe signature verification failed.");
+    }
   }
 
   private verifyMockWebhookSignature(signature: string | undefined, rawBody: Buffer) {

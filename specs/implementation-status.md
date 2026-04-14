@@ -92,7 +92,7 @@ Update this file after each major Codex pass.
 - [ ] traces
 - [ ] backups
 - [ ] load tests
-- [ ] security review
+- [~] security review
 
 ## Docs and runbooks
 - [x] local runbook
@@ -117,6 +117,10 @@ Update this file after each major Codex pass.
 
 ## Verification truth
 - locally verified:
+  - observed in this session for the security/resilience pass: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm test:dashboard:e2e`
+  - exact security/resilience API flow observed green in this session: `unauthenticated /me -> logout invalidates bearer session -> unsafe QR payload with embedded credentials rejected -> unsafe avatar URL rejected -> billing success/cancel open-redirect rejected -> create QR -> corrupted PNG asset repaired on download -> render queue failure returns user-safe 503 with request ID -> invalid webhook signature rejected -> duplicate webhook delivery stays idempotent`
+  - exact security/resilience browser flow still observed green in this session after the hardening changes: `sign in -> create QR -> list/details/download/analytics -> billing/test-mode flow -> quota block -> profile update -> duplicate -> archive -> delete -> logout`
+  - observed in this session that API/runtime hardening now adds secret redaction in structured logs, safe 503 user messages, same-origin billing return URL enforcement, http/https-only URL validation without embedded credentials, public-scan redirect target validation, download self-repair for missing/corrupt locally stored QR assets, and inline fallbacks when aggregate/scan-event queue dispatch fails
   - observed in this session for the launch-readiness pass: `pnpm build`, `pnpm lint`, `pnpm typecheck`, `pnpm --filter @qr/api test:integration`, and `pnpm test:dashboard:e2e`
   - exact support/readiness API flow observed green in this session: `request-id middleware -> sanitized 403 API error body with matching X-Request-Id -> friendly invalid public scan 404 HTML -> friendly inactive public scan 410 HTML -> full existing auth/QR/billing/reset/profile integration smoke`
   - exact support/readiness browser flow observed green in this session: `sign in -> empty QR list -> create link QR -> refresh restores session -> QR details -> analytics -> billing -> quota block surfaced without raw internals -> profile update -> duplicate -> archive -> delete -> logout -> protected route returns to auth form`
@@ -168,6 +172,7 @@ Update this file after each major Codex pass.
   - the real-bucket smoke path now exists in `apps/api/src/integration/real-bucket.spec.ts` and the repository CI can attempt it through job `verify-real-bucket`
   - GitHub Actions job `verify-real-bucket` was observed as `skipped` on `ci #32`, `ci #31`, and `ci #24` because the repository did not expose the required `REAL_BUCKET_STORAGE_DRIVER` variable and live S3/R2 secrets together
 - MVP-only or not yet live-verified beyond CI:
+  - the latest security/resilience hardening pass is locally observed only in this session; no GitHub Actions run for these exact commits has been observed yet
   - the new deploy foundation in `deploy/runtime/` is prepared in-repo and CI-compatible, but it is not staging-verified or hosting-verified
   - remote S3/R2 object storage lifecycle, signed-download redirects, and orphan cleanup against a live bucket
   - orphan cleanup as an operator-run maintenance task instead of scheduled retention automation
@@ -175,12 +180,14 @@ Update this file after each major Codex pass.
   - forgot/reset password in a production-like staging environment with real email delivery or a smoke mailbox
   - metrics, traces, dead-letter handling, notification jobs, backup strategy, and security review
 - top remaining production blockers:
+  - the new security/resilience pass is not yet CI-observed on current HEAD, so live GitHub verification for these exact changes is still pending
   - no observed staging deployment yet for `web`, `api`, `worker`, `postgres`, `redis`, and storage together
   - no observed S3/R2 verification yet for upload/download/render lifecycle, signed URL policy, or orphan cleanup against a real bucket
   - the repo still needs real staging variables and real bucket secrets configured before GitHub Actions can move those optional jobs from `skipped` to observed execution
   - staging smoke currently requires an explicit `STAGING_SMOKE_WORKSPACE_ID` because workspace listing/management is intentionally still out of scope
   - the new `deploy/runtime/` shape is prepared for a future deploy, but Docker-based runtime boot has not been observed from this machine because Docker is still unavailable locally
   - billing is now verified only in deterministic mock/test mode; a live Stripe test account, hosted checkout, and externally delivered webhook run are still unobserved
+  - production-only private-host blocking for redirect/avatar-style URLs is coded behind `NODE_ENV=production` or `ALLOW_PRIVATE_TARGET_URLS=false`, but that exact branch is not yet observed in a deployed environment
 
 ## Billing gaps
 - live Stripe test-mode checkout and webhook delivery against Stripe-hosted infrastructure are still unverified; current billing truth uses the deterministic mock Stripe-compatible mode

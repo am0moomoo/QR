@@ -52,6 +52,10 @@ export function toErrorMessage(error: unknown) {
       return "Your session ended. Sign in again to keep managing your QR codes.";
     }
 
+    if (error.status === 503) {
+      return error.message;
+    }
+
     if (
       error.status === 404 &&
       /download|asset/i.test(error.message)

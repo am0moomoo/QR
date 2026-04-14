@@ -4,7 +4,11 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 import { configureApiApp } from "./bootstrap-api";
 import { StructuredLoggerService } from "./common/structured-logger.service";
-import { getNestLoggerLevels, getRuntimeSummary } from "./runtime-config";
+import {
+  getNestLoggerLevels,
+  getRuntimeSummary,
+  getRuntimeWarnings
+} from "./runtime-config";
 
 async function bootstrap() {
   process.env.APP_ROLE = process.env.APP_ROLE ?? "api";
@@ -19,6 +23,15 @@ async function bootstrap() {
     getRuntimeSummary(),
     "bootstrap"
   );
+  for (const warning of getRuntimeWarnings()) {
+    app.get(StructuredLoggerService).warn(
+      "app.runtime_warning",
+      {
+        warning
+      },
+      "bootstrap"
+    );
+  }
 
   const config = new DocumentBuilder()
     .setTitle("QRFlow API")
